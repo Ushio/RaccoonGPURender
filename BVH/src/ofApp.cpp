@@ -1,10 +1,63 @@
 ﻿#include "ofApp.h"
 
 #include "assertion.hpp"
+#include <embree3/rtcore.h>
 
+inline void EmbreeErorrHandler(void* userPtr, RTCError code, const char* str) {
+	printf("Embree Error [%d] %s\n", code, str);
+}
+
+class BVHNode {
+public:
+	virtual ~BVHNode() {}
+};
+class BVHBranch : public BVHNode {
+public:
+	BVHNode *L = nullptr;
+	BVHNode *R = nullptr;
+	RTCBounds L_bounds;
+	RTCBounds R_bounds;
+};
+class BVHLeaf : public BVHNode {
+public:
+	uint32_t primitive_ids[5];
+	uint32_t primitive_count = 0;
+};
+
+static void* create_branch(RTCThreadLocalAllocator alloc, unsigned int numChildren, void* userPtr)
+{
+	RT_ASSERT(numChildren == 2);
+	void *ptr = rtcThreadLocalAlloc(alloc, sizeof(BVHBranch), 16);
+	return (void *) new (ptr) BVHBranch;
+}
+static void set_children_to_branch(void* nodePtr, void** childPtr, unsigned int numChildren, void* userPtr)
+{
+	RT_ASSERT(numChildren == 2);
+	((BVHBranch *)nodePtr)->L = (BVHNode *)childPtr[0];
+	((BVHBranch *)nodePtr)->R = (BVHNode *)childPtr[1];
+}
+static void set_branch_bounds(void* nodePtr, const RTCBounds** bounds, unsigned int numChildren, void* userPtr)
+{
+	RT_ASSERT(numChildren == 2);
+
+	((BVHBranch *)nodePtr)->L_bounds = *(const RTCBounds*)bounds[0];
+	((BVHBranch *)nodePtr)->R_bounds = *(const RTCBounds*)bounds[1];
+}
+static void* create_leaf(RTCThreadLocalAllocator alloc, const RTCBuildPrimitive* prims, size_t numPrims, void* userPtr)
+{
+	RT_ASSERT(numPrims <= 5);
+	void* ptr = rtcThreadLocalAlloc(alloc, sizeof(BVHLeaf), 16);
+	BVHLeaf *l = new (ptr) BVHLeaf();
+	l->primitive_count = numPrims;
+	for (int i = 0; i < numPrims; ++i) {
+		l->primitive_ids[i] = prims[i].primID;
+	}
+	return ptr;
+}
 class GPUBVH {
 public:
 	GPUBVH(std::shared_ptr<houdini_alembic::AlembicScene> scene):_scene(scene){
+		RT_ASSERT(scene->objects.size() == 1);
 		for (auto o : scene->objects) {
 			if (o->visible == false) {
 				continue;
@@ -20,6 +73,7 @@ public:
 				addPolymesh(polymesh);
 			}
 		}
+		
 	}
 
 	void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
@@ -49,6 +103,61 @@ public:
 
 		RT_ASSERT(std::all_of(_indices.begin(), _indices.end(), [&](uint32_t index) { return index < _points.size(); }));
 
+		//RTCDevice device = rtcNewDevice("tri_accel=bvh4.triangle4v");
+		//RTCScene scene = rtcNewScene(device);
+		//rtcSetDeviceErrorFunction(device, EmbreeErorrHandler, nullptr);
+		//rtcSetSceneBuildQuality(scene, RTC_BUILD_QUALITY_HIGH);
+
+		//// add to embree
+		//// https://www.slideshare.net/IntelSoftware/embree-ray-tracing-kernels-overview-and-new-features-siggraph-2018-tech-session
+		//RTCGeometry g = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_TRIANGLE);
+
+		//size_t vertexStride = sizeof(glm::vec3);
+		//rtcSetSharedGeometryBuffer(g, RTC_BUFFER_TYPE_VERTEX, 0 /*slot*/, RTC_FORMAT_FLOAT3, _points.data(), 0 /*byteoffset*/, vertexStride, _points.size());
+
+		//size_t indexStride = sizeof(uint32_t) * 3;
+		//size_t primitiveCount = _indices.size() / 3;
+		//rtcSetSharedGeometryBuffer(g, RTC_BUFFER_TYPE_INDEX, 0 /*slot*/, RTC_FORMAT_UINT3, _indices.data(), 0 /*byteoffset*/, indexStride, primitiveCount);
+
+		//rtcCommitGeometry(g);
+		//rtcAttachGeometryByID(scene, g, 0);
+		//rtcReleaseGeometry(g);
+
+		//rtcCommitScene(scene);
+
+		RTCDevice device = rtcNewDevice("");
+		RTCBVH bvh = rtcNewBVH(device);
+
+		_primitives.clear();
+
+		float minY = FLT_MAX;
+		for(int i = 0, n = primitive_count(); i < n ; ++i) {
+			auto p = primitive(i);
+			minY = min(minY, p.lower_y);
+			_primitives.emplace_back(p);
+		}
+
+		RTCBuildArguments arguments = rtcDefaultBuildArguments();
+		arguments.byteSize = sizeof(arguments);
+		arguments.buildQuality = RTC_BUILD_QUALITY_HIGH;
+		arguments.maxBranchingFactor = 2;
+		arguments.bvh = bvh;
+		arguments.primitives = _primitives.data();
+		arguments.primitiveCount = _primitives.size();
+		arguments.primitiveArrayCapacity = _primitives.capacity();
+		arguments.minLeafSize = 1;
+		arguments.maxLeafSize = 5;
+		arguments.createNode = create_branch;
+		arguments.setNodeChildren = set_children_to_branch;
+		arguments.setNodeBounds = set_branch_bounds;
+		arguments.createLeaf = create_leaf;
+		arguments.splitPrimitive = nullptr;
+		_bvh = (BVHNode *)rtcBuildBVH(&arguments);
+
+		// BVHBranch *b = dynamic_cast<BVHBranch *>(_bvh);
+
+		//https://github.com/embree/embree/blob/master/tutorials/bvh_builder/bvh_builder_device.cpp
+
 		// add material
 		//auto Le = p->primitives.column_as_vector3("Le");
 		//auto Cd = p->primitives.column_as_vector3("Cd");
@@ -62,15 +171,41 @@ public:
 		//	_materials.emplace_back(m);
 		//}
 	}
-
+	
 	std::shared_ptr<houdini_alembic::AlembicScene> _scene;
 	houdini_alembic::CameraObject *_camera = nullptr;
 
+	int primitive_count() const {
+		return _indices.size() / 3;
+	}
+	RTCBuildPrimitive primitive(int primitive_index) {
+		RTCBuildPrimitive prim = {};
+		int index = primitive_index * 3;
+
+		glm::vec3 min_value(FLT_MAX);
+		glm::vec3 max_value(-FLT_MAX);
+		for (int i = 0; i < 3; ++i) {
+			auto P = _points[_indices[index + i]];
+			min_value = glm::min(min_value, P);
+			max_value = glm::max(max_value, P);
+		}
+		prim.lower_x = min_value.x;
+		prim.lower_y = min_value.y;
+		prim.lower_z = min_value.z;
+		prim.geomID = 0;
+		prim.upper_x = max_value.x;
+		prim.upper_y = max_value.y;
+		prim.upper_z = max_value.z;
+		prim.primID = primitive_index;
+		return prim;
+	}
 	std::vector<uint32_t> _indices;
 	std::vector<glm::vec3> _points;
+	std::vector<RTCBuildPrimitive> _primitives;
+	BVHNode *_bvh = nullptr;
 };
 
-GPUBVH *_renderer = nullptr;
+GPUBVH *_gpubvh = nullptr;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -94,7 +229,7 @@ void ofApp::setup() {
 
 	_camera_model.load("../../../scenes/camera_model.ply");
 
-	_renderer = new GPUBVH(_alembicscene);
+	_gpubvh = new GPUBVH(_alembicscene);
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -107,6 +242,45 @@ void ofApp::update() {
 
 inline bool isPowerOfTwo(uint32_t n) {
 	return (n & (n - 1)) == 0;
+}
+
+void draw_bounds(const RTCBounds b) {
+	float w = (b.upper_x - b.lower_x);
+	float h = (b.upper_y - b.lower_y);
+	float d = (b.upper_z - b.lower_z);
+	float x = (b.lower_x + b.upper_x) * 0.5f;
+	float y = (b.lower_y + b.upper_y) * 0.5f;
+	float z = (b.lower_z + b.upper_z) * 0.5f;
+	ofNoFill();
+	ofDrawBox(x, y, z, w, h, d);
+	ofFill();
+}
+inline void draw_bvh(BVHNode *node, int depth = 0) {
+	if (2 < depth) {
+		return;
+	}
+
+	ofColor colors[6] = {
+		ofColor(255, 0, 0),
+		ofColor(0, 255, 0),
+		ofColor(0, 0, 255),
+		ofColor(0, 255, 255),
+		ofColor(255, 0, 255),
+		ofColor(255, 255, 0),
+	};
+	if (BVHBranch *branch = dynamic_cast<BVHBranch *>(node)) {
+		ofSetColor(colors[depth % 6]);
+		draw_bounds(branch->L_bounds);
+		ofSetColor(colors[depth % 6] / 2);
+		draw_bounds(branch->R_bounds);
+
+		draw_bvh(branch->L, depth + 1);
+		draw_bvh(branch->R, depth + 1);
+	}
+	else
+	{
+		BVHLeaf *leaf = dynamic_cast<BVHLeaf *>(node);
+	}
 }
 
 //--------------------------------------------------------------
@@ -152,6 +326,7 @@ void ofApp::draw() {
 	if (_alembicscene && show_scene_preview) {
 		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	}
+	draw_bvh(_gpubvh->_bvh);
 
 	//{
 	//	static ofMesh mesh;

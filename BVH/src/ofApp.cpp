@@ -7,10 +7,14 @@ inline void EmbreeErorrHandler(void* userPtr, RTCError code, const char* str) {
 	printf("Embree Error [%d] %s\n", code, str);
 }
 
+class BVHBranch;
+
 class BVHNode {
 public:
 	virtual ~BVHNode() {}
+	BVHBranch *parent = nullptr;
 };
+
 class BVHBranch : public BVHNode {
 public:
 	BVHNode *L = nullptr;
@@ -24,11 +28,16 @@ public:
 	uint32_t primitive_count = 0;
 };
 
+
 static void* create_branch(RTCThreadLocalAllocator alloc, unsigned int numChildren, void* userPtr)
 {
 	RT_ASSERT(numChildren == 2);
 	void *ptr = rtcThreadLocalAlloc(alloc, sizeof(BVHBranch), 16);
-	return (void *) new (ptr) BVHBranch;
+
+	// direct "BVHBranch *" to "void *" cast maybe cause undefined behavior when "void *" to "BVHNode *"
+	// so "BVHBranch *" to "BVHNode *"
+	BVHNode *node = new (ptr) BVHBranch;
+	return (void *)node;
 }
 static void set_children_to_branch(void* nodePtr, void** childPtr, unsigned int numChildren, void* userPtr)
 {
@@ -102,28 +111,6 @@ public:
 		}
 
 		RT_ASSERT(std::all_of(_indices.begin(), _indices.end(), [&](uint32_t index) { return index < _points.size(); }));
-
-		//RTCDevice device = rtcNewDevice("tri_accel=bvh4.triangle4v");
-		//RTCScene scene = rtcNewScene(device);
-		//rtcSetDeviceErrorFunction(device, EmbreeErorrHandler, nullptr);
-		//rtcSetSceneBuildQuality(scene, RTC_BUILD_QUALITY_HIGH);
-
-		//// add to embree
-		//// https://www.slideshare.net/IntelSoftware/embree-ray-tracing-kernels-overview-and-new-features-siggraph-2018-tech-session
-		//RTCGeometry g = rtcNewGeometry(device, RTC_GEOMETRY_TYPE_TRIANGLE);
-
-		//size_t vertexStride = sizeof(glm::vec3);
-		//rtcSetSharedGeometryBuffer(g, RTC_BUFFER_TYPE_VERTEX, 0 /*slot*/, RTC_FORMAT_FLOAT3, _points.data(), 0 /*byteoffset*/, vertexStride, _points.size());
-
-		//size_t indexStride = sizeof(uint32_t) * 3;
-		//size_t primitiveCount = _indices.size() / 3;
-		//rtcSetSharedGeometryBuffer(g, RTC_BUFFER_TYPE_INDEX, 0 /*slot*/, RTC_FORMAT_UINT3, _indices.data(), 0 /*byteoffset*/, indexStride, primitiveCount);
-
-		//rtcCommitGeometry(g);
-		//rtcAttachGeometryByID(scene, g, 0);
-		//rtcReleaseGeometry(g);
-
-		//rtcCommitScene(scene);
 
 		RTCDevice device = rtcNewDevice("");
 		RTCBVH bvh = rtcNewBVH(device);
@@ -205,46 +192,15 @@ public:
 	BVHNode *_bvh = nullptr;
 };
 
-GPUBVH *_gpubvh = nullptr;
-
-//--------------------------------------------------------------
-void ofApp::setup() {
-	ofxRaccoonImGui::initialize();
-
-	_camera.setNearClip(0.1f);
-	_camera.setFarClip(100.0f);
-	_camera.setDistance(5.0f);
-
-	houdini_alembic::AlembicStorage storage;
-	std::string error_message;
-	storage.open(ofToDataPath("rungholt.abc"), error_message);
-
-	if (storage.isOpened()) {
-		std::string error_message;
-		_alembicscene = storage.read(0, error_message);
-	}
-	if (error_message.empty() == false) {
-		printf("sample error_message: %s\n", error_message.c_str());
-	}
-
-	_camera_model.load("../../../scenes/camera_model.ply");
-
-	_gpubvh = new GPUBVH(_alembicscene);
-}
-void ofApp::exit() {
-	ofxRaccoonImGui::shutdown();
+glm::vec3 bounds_min(const RTCBounds &b) {
+	return glm::vec3(b.lower_x, b.lower_y, b.lower_z);
 }
 
-//--------------------------------------------------------------
-void ofApp::update() {
-
+glm::vec3 bounds_max(const RTCBounds &b) {
+	return glm::vec3(b.upper_x, b.upper_y, b.upper_z);
 }
 
-inline bool isPowerOfTwo(uint32_t n) {
-	return (n & (n - 1)) == 0;
-}
-
-void draw_bounds(const RTCBounds b) {
+void draw_bounds(const RTCBounds &b) {
 	float w = (b.upper_x - b.lower_x);
 	float h = (b.upper_y - b.lower_y);
 	float d = (b.upper_z - b.lower_z);
@@ -254,6 +210,7 @@ void draw_bounds(const RTCBounds b) {
 	ofNoFill();
 	ofDrawBox(x, y, z, w, h, d);
 	ofFill();
+	// ofDrawLine(bounds_min(b), bounds_max(b));
 }
 inline void draw_bvh(BVHNode *node, int depth = 0) {
 	if (2 < depth) {
@@ -283,10 +240,269 @@ inline void draw_bvh(BVHNode *node, int depth = 0) {
 	}
 }
 
+
+bool slabs(glm::vec3 p0, glm::vec3 p1, glm::vec3 ro, glm::vec3 one_over_rd) {
+	glm::vec3 t0 = (p0 - ro) * one_over_rd;
+	glm::vec3 t1 = (p1 - ro) * one_over_rd;
+	glm::vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+	return glm::compMax(tmin) <= glm::compMin(tmax);
+}
+
+inline bool intersect_ray_triangle(const glm::vec3 &orig, const glm::vec3 &dir, const glm::vec3 &v0, const glm::vec3 &v1, const glm::vec3 &v2, float *tmin)
+{
+	const float kEpsilon = 1.0e-5;
+
+	glm::vec3 v0v1 = v1 - v0;
+	glm::vec3 v0v2 = v2 - v0;
+	glm::vec3 pvec = glm::cross(dir, v0v2);
+	float det = glm::dot(v0v1, pvec);
+
+	if (fabs(det) < kEpsilon) {
+		return false;
+	}
+
+	float invDet = 1.0f / det;
+
+	glm::vec3 tvec = orig - v0;
+	double u = glm::dot(tvec, pvec) * invDet;
+	if (u < 0.0f || u > 1.0f) {
+		return false;
+	}
+
+	glm::vec3 qvec = glm::cross(tvec, v0v1);
+	float v = glm::dot(dir, qvec) * invDet;
+	if (v < 0.0f || u + v > 1.0f) {
+		return false;
+	}
+
+	float t = glm::dot(v0v2, qvec) * invDet;
+
+	if (t < 0.0f) {
+		return false;
+	}
+	if (*tmin < t) {
+		return false;
+	}
+	*tmin = t;
+	return true;
+}
+void intersect_recursive(BVHNode *node, glm::vec3 ro, glm::vec3 rd, glm::vec3 one_over_rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, bool *intersected, float *tmin) {
+	if (BVHBranch *branch = dynamic_cast<BVHBranch *>(node)) {
+		if (slabs(bounds_min(branch->L_bounds), bounds_max(branch->L_bounds), ro, one_over_rd)) {
+			//ofSetColor(255);
+			//draw_bounds(branch->L_bounds);
+			intersect_recursive(branch->L, ro, rd, one_over_rd, indices, points, intersected, tmin);
+		}
+		if (slabs(bounds_min(branch->R_bounds), bounds_max(branch->R_bounds), ro, one_over_rd)) {
+			//ofSetColor(255);
+			//draw_bounds(branch->R_bounds);
+			intersect_recursive(branch->R, ro, rd, one_over_rd, indices, points, intersected, tmin);
+		}
+	}
+	else
+	{
+		BVHLeaf *leaf = dynamic_cast<BVHLeaf *>(node);
+		for (int i = 0; i < leaf->primitive_count; ++i) {
+			int index = leaf->primitive_ids[i] * 3;
+			glm::vec3 v0 = points[indices[index]];
+			glm::vec3 v1 = points[indices[index + 1]];
+			glm::vec3 v2 = points[indices[index + 2]];
+			if (intersect_ray_triangle(ro, rd, v0, v1, v2, tmin)) {
+				*intersected = true;
+			}
+		}
+	}
+}
+
+bool intersect(BVHNode *node, glm::vec3 ro, glm::vec3 rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, float *tmin) {
+	bool intersected = false;
+	intersect_recursive(node, ro, rd, glm::vec3(1.0f) / rd, indices, points, &intersected, tmin);
+	return intersected;
+}
+
+struct ThreadedNode {
+	RTCBounds bounds;
+	int hit_link = -1;
+	int miss_link = -1;
+	bool is_leaf = false;
+	BVHNode *node_ptr = nullptr;
+};
+struct ThreadedBVH {
+	std::vector<ThreadedNode> nodes;
+	std::map<BVHNode *, int> node_indices;
+};
+
+void link_parent(BVHNode *node) {
+	if (BVHBranch *branch = dynamic_cast<BVHBranch *>(node)) {
+		branch->L->parent = branch;
+		branch->R->parent = branch;
+		link_parent(branch->L);
+		link_parent(branch->R);
+	}
+}
+RTCBounds union_bounds(const RTCBounds &a, const RTCBounds &b) {
+	RTCBounds u;
+	u.lower_x = std::min(a.lower_x, b.lower_x);
+	u.lower_y = std::min(a.lower_y, b.lower_y);
+	u.lower_z = std::min(a.lower_z, b.lower_z);
+	u.upper_x = std::max(a.upper_x, b.upper_x);
+	u.upper_y = std::max(a.upper_y, b.upper_y);
+	u.upper_z = std::max(a.upper_z, b.upper_z);
+	return u;
+}
+void build_threaded_bvh_hit_link(BVHNode *node, ThreadedBVH *tbvh, RTCBounds *bounds = nullptr) {
+	int index = tbvh->nodes.size();
+	tbvh->nodes.emplace_back(ThreadedNode());
+	tbvh->nodes[index].hit_link = index + 1;
+	tbvh->nodes[index].node_ptr = node;
+
+	tbvh->node_indices[node] = index;
+
+	if (BVHBranch *branch = dynamic_cast<BVHBranch *>(node)) {
+		tbvh->nodes[index].is_leaf = false;
+		if (bounds == nullptr) {
+			tbvh->nodes[index].bounds = union_bounds(branch->L_bounds, branch->R_bounds);
+		}
+		else {
+			tbvh->nodes[index].bounds = *bounds;
+		}
+
+		build_threaded_bvh_hit_link(branch->L, tbvh, &branch->L_bounds);
+		build_threaded_bvh_hit_link(branch->R, tbvh, &branch->R_bounds);
+	}
+	else {
+		RT_ASSERT(bounds);
+		tbvh->nodes[index].is_leaf = true;
+		tbvh->nodes[index].bounds = *bounds;
+	}
+}
+
+void build_threaded_bvh_miss_link(BVHNode *node, ThreadedBVH *tbvh, bool isL = false) {
+	int index = tbvh->node_indices[node];
+	if (BVHBranch *branch = dynamic_cast<BVHBranch *>(node)) {
+		if (node->parent == nullptr) {
+			tbvh->nodes[index].miss_link = -1;
+		}
+		else {
+			if (isL) {
+				tbvh->nodes[index].miss_link = tbvh->node_indices[node->parent->R];
+			}
+			else {
+				BVHNode *parent_sibling = nullptr;
+				BVHBranch *parent = node->parent;
+				for (;;) {
+					if (parent->parent == nullptr) {
+						break;
+					}
+					if (parent->parent->R != parent) {
+						parent_sibling = parent->parent->R;
+						break;
+					}
+					else {
+						parent = parent->parent;
+					}
+				}
+				tbvh->nodes[index].miss_link = tbvh->node_indices[parent_sibling];
+			}
+		}
+		build_threaded_bvh_miss_link(branch->L, tbvh, true);
+		build_threaded_bvh_miss_link(branch->R, tbvh, false);
+	}
+	else {
+		tbvh->nodes[index].miss_link = tbvh->nodes[index].hit_link;
+	}
+}
+void build_threaded_bvh(BVHNode *node, ThreadedBVH *tbvh) {
+	// link
+	link_parent(node);
+
+	// hit
+	build_threaded_bvh_hit_link(node, tbvh);
+	tbvh->node_indices[nullptr] = -1;
+	tbvh->nodes[tbvh->nodes.size() - 1].hit_link = -1;
+
+	// miss
+	build_threaded_bvh_miss_link(node, tbvh);
+}
+
+bool intersect_tbvh(ThreadedBVH *bvh, glm::vec3 ro, glm::vec3 rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, float *tmin) {
+	glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
+	bool intersected = false;
+	int node = 0;
+	while (0 <= node) {
+		auto bounds = bvh->nodes[node].bounds;
+		//ofSetColor(255);
+		//draw_bounds(bounds);
+
+		if (slabs(bounds_min(bounds), bounds_max(bounds), ro, one_over_rd)) {
+			if (bvh->nodes[node].is_leaf) {
+				BVHLeaf *leaf = dynamic_cast<BVHLeaf *>(bvh->nodes[node].node_ptr);
+				for (int i = 0; i < leaf->primitive_count; ++i) {
+					int index = leaf->primitive_ids[i] * 3;
+					glm::vec3 v0 = points[indices[index]];
+					glm::vec3 v1 = points[indices[index + 1]];
+					glm::vec3 v2 = points[indices[index + 2]];
+					if (intersect_ray_triangle(ro, rd, v0, v1, v2, tmin)) {
+						intersected = true;
+					}
+				}
+			}
+			node = bvh->nodes[node].hit_link;
+		}
+		else {
+			node = bvh->nodes[node].miss_link;
+		}
+	}
+	return intersected;
+}
+
+GPUBVH *_gpubvh = nullptr;
+ThreadedBVH _tbvh;
+
+//--------------------------------------------------------------
+void ofApp::setup() {
+	ofxRaccoonImGui::initialize();
+
+	_camera.setNearClip(0.1f);
+	_camera.setFarClip(100.0f);
+	_camera.setDistance(5.0f);
+
+	houdini_alembic::AlembicStorage storage;
+	std::string error_message;
+	storage.open(ofToDataPath("rungholt.abc"), error_message);
+
+	if (storage.isOpened()) {
+		std::string error_message;
+		_alembicscene = storage.read(0, error_message);
+	}
+	if (error_message.empty() == false) {
+		printf("sample error_message: %s\n", error_message.c_str());
+	}
+
+	_camera_model.load("../../../scenes/camera_model.ply");
+
+	_gpubvh = new GPUBVH(_alembicscene);
+	build_threaded_bvh(_gpubvh->_bvh, &_tbvh);
+}
+void ofApp::exit() {
+	ofxRaccoonImGui::shutdown();
+}
+
+//--------------------------------------------------------------
+void ofApp::update() {
+
+}
+
+inline bool isPowerOfTwo(uint32_t n) {
+	return (n & (n - 1)) == 0;
+}
+
+
 //--------------------------------------------------------------
 void ofApp::draw() {
 	static bool show_scene_preview = true;
-	static int frame = 0;
+	static int rays = 1;
+	static float height = 5.0f;
 
 	//if (_renderer) {
 	//	_renderer->step();
@@ -326,7 +542,36 @@ void ofApp::draw() {
 	if (_alembicscene && show_scene_preview) {
 		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	}
-	draw_bvh(_gpubvh->_bvh);
+	//draw_bvh(_gpubvh->_bvh);
+
+	for (int i = 0; i < rays; ++i) {
+		float theta = ofMap(i, 0, rays, 0, 2.0f * glm::pi<float>());
+		glm::vec3 ro(5.0f * sin(theta), height, 5.0f * cos(theta));
+		glm::vec3 rd = glm::normalize(glm::vec3(0.0f, 2.0f, 0.0f) - ro);
+
+		ofSetColor(ofColor::gray);
+		ofDrawSphere(ro, 0.02f);
+
+		float tmin = FLT_MAX;
+		if (intersect(_gpubvh->_bvh, ro, rd, _gpubvh->_indices, _gpubvh->_points, &tmin)) {
+			ofSetColor(ofColor::red);
+			ofDrawLine(ro, ro + rd * tmin);
+			ofDrawSphere(ro + rd * tmin, 0.02f);
+		}
+		else {
+			ofSetColor(ofColor::gray);
+			ofDrawLine(ro, ro + rd * 10.0f);
+		}
+		//if (intersect_tbvh(&_tbvh, ro, rd, _gpubvh->_indices, _gpubvh->_points, &tmin)) {
+		//	ofSetColor(ofColor::red);
+		//	ofDrawLine(ro, ro + rd * tmin);
+		//	ofDrawSphere(ro + rd * tmin, 0.02f);
+		//}
+		//else {
+		//	ofSetColor(ofColor::gray);
+		//	ofDrawLine(ro, ro + rd * 10.0f);
+		//}
+	}
 
 	//{
 	//	static ofMesh mesh;
@@ -390,7 +635,8 @@ void ofApp::draw() {
 	ImGui::Begin("settings", nullptr);
 	ImGui::Checkbox("scene preview", &show_scene_preview);
 	
-	ImGui::Text("frame : %d", frame);
+	ImGui::InputInt("rays", &rays);
+	ImGui::InputFloat("height", &height, 0.1f);
 	//ImGui::Separator();
 	//ImGui::Text("%d sample, fps = %.3f", _renderer->stepCount(), ofGetFrameRate());
 	//ImGui::Text("%d bad sample nan", _renderer->badSampleNanCount());

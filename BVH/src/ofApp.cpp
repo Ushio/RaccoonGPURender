@@ -3,6 +3,8 @@
 #include "assertion.hpp"
 #include <embree3/rtcore.h>
 
+#include "gpu.hpp"
+
 inline void EmbreeErorrHandler(void* userPtr, RTCError code, const char* str) {
 	printf("Embree Error [%d] %s\n", code, str);
 }
@@ -65,8 +67,10 @@ static void* create_leaf(RTCThreadLocalAllocator alloc, const RTCBuildPrimitive*
 }
 class GPUBVH {
 public:
+	char camera_info[512];
 	GPUBVH(std::shared_ptr<houdini_alembic::AlembicScene> scene):_scene(scene){
-		RT_ASSERT(scene->objects.size() == 1);
+		// 
+		int meshCount = 0;
 		for (auto o : scene->objects) {
 			if (o->visible == false) {
 				continue;
@@ -80,9 +84,22 @@ public:
 
 			if (auto polymesh = o.as_polygonMesh()) {
 				addPolymesh(polymesh);
+				meshCount++;
 			}
 		}
+		RT_ASSERT(meshCount == 1);
 		
+		if (_camera) {
+			sprintf(camera_info,
+				"\tfloat fovy = %f;\n\tfloat3 eye = (float3)(%ff, %ff, %ff);\n\tfloat3 center = (float3)(%ff, %ff, %ff);\n\tfloat3 up = (float3)(%ff, %ff, %ff);\n",
+				glm::radians(_camera->fov_vertical_degree),
+				_camera->eye.x, _camera->eye.y, _camera->eye.z,
+				_camera->lookat.x, _camera->lookat.y, _camera->lookat.z,
+				_camera->up.x, _camera->up.y, _camera->up.z);
+		}
+		else {
+			sprintf(camera_info, "");
+		}
 	}
 
 	void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
@@ -425,6 +442,7 @@ void build_threaded_bvh(BVHNode *node, ThreadedBVH *tbvh) {
 	build_threaded_bvh_miss_link(node, tbvh);
 }
 
+// TODO: traverse check
 bool intersect_tbvh(ThreadedBVH *bvh, glm::vec3 ro, glm::vec3 rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, float *tmin) {
 	glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
 	bool intersected = false;
@@ -456,8 +474,92 @@ bool intersect_tbvh(ThreadedBVH *bvh, glm::vec3 ro, glm::vec3 rd, const std::vec
 	return intersected;
 }
 
+inline gpu::float4 to(const glm::vec3 &v) {
+	gpu::float4 r = { v.x, v.y, v.z, 0.0 };
+	return r;
+}
+inline gpu::Bounds to(const RTCBounds &b) {
+	gpu::Bounds r = { 
+		to(bounds_min(b)),
+		to(bounds_max(b))
+	};
+	return r;
+}
+void build_gpu_tbvh(ThreadedBVH *tbvh, gpu::Polymesh *gpu_tbvh, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points) {
+	gpu_tbvh->points.resize(points.size());
+	for (int i = 0; i < gpu_tbvh->points.size(); ++i) {
+		gpu_tbvh->points[i] = to(points[i]);
+	}
+	gpu_tbvh->indices = indices;
+	gpu_tbvh->nodes.resize(tbvh->nodes.size());
+	
+	for (int i = 0; i < tbvh->nodes.size(); ++i) {
+		gpu_tbvh->nodes[i].bounds = to(tbvh->nodes[i].bounds);
+		gpu_tbvh->nodes[i].hit_link = tbvh->nodes[i].hit_link;
+		gpu_tbvh->nodes[i].miss_link = tbvh->nodes[i].miss_link;
+		if (tbvh->nodes[i].is_leaf) {
+			BVHLeaf *leaf = dynamic_cast<BVHLeaf *>(tbvh->nodes[i].node_ptr);
+			gpu_tbvh->nodes[i].primitive_indices_beg = gpu_tbvh->primitive_indices.size();
+			for (int i = 0; i < leaf->primitive_count; ++i) {
+				int primitive_index = leaf->primitive_ids[i];
+				gpu_tbvh->primitive_indices.push_back(primitive_index);
+			}
+			gpu_tbvh->nodes[i].primitive_indices_end = gpu_tbvh->primitive_indices.size();
+		}
+		else {
+			gpu_tbvh->nodes[i].primitive_indices_beg = -1;
+			gpu_tbvh->nodes[i].primitive_indices_end = -1;
+		}
+	}
+}
+
+inline glm::vec3 to(const gpu::float4 &v) {
+	return glm::vec3 { v.x, v.y, v.z };
+}
+inline RTCBounds to(const gpu::Bounds &b) {
+	RTCBounds r = {
+		b.lower.x, b.lower.y, b.lower.z, 0.0f,
+		b.upper.x, b.upper.y, b.upper.z, 0.0f,
+	};
+	return r;
+}
+
+// TODO: traverse check
+bool intersect_gpu_tbvh(gpu::Polymesh *bvh, glm::vec3 ro, glm::vec3 rd, float *tmin, int *primitive_index) {
+	glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
+	bool intersected = false;
+	int node = 0;
+	while (0 <= node) {
+		auto bounds = to(bvh->nodes[node].bounds);
+		//ofSetColor(255);
+		//draw_bounds(bounds);
+
+		if (slabs(bounds_min(bounds), bounds_max(bounds), ro, one_over_rd)) {
+			bool is_leaf = 0 <= bvh->nodes[node].primitive_indices_beg;
+			if (is_leaf) {
+				for (int i = bvh->nodes[node].primitive_indices_beg; i < bvh->nodes[node].primitive_indices_end; ++i) {
+					int index = bvh->primitive_indices[i] * 3;
+					glm::vec3 v0 = to(bvh->points[bvh->indices[index]]);
+					glm::vec3 v1 = to(bvh->points[bvh->indices[index + 1]]);
+					glm::vec3 v2 = to(bvh->points[bvh->indices[index + 2]]);
+					if (intersect_ray_triangle(ro, rd, v0, v1, v2, tmin)) {
+						intersected = true;
+						*primitive_index = bvh->primitive_indices[i];
+					}
+				}
+			}
+			node = bvh->nodes[node].hit_link;
+		}
+		else {
+			node = bvh->nodes[node].miss_link;
+		}
+	}
+	return intersected;
+}
+
 GPUBVH *_gpubvh = nullptr;
 ThreadedBVH _tbvh;
+gpu::Polymesh _gpu_polymesh;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -483,6 +585,13 @@ void ofApp::setup() {
 
 	_gpubvh = new GPUBVH(_alembicscene);
 	build_threaded_bvh(_gpubvh->_bvh, &_tbvh);
+	build_gpu_tbvh(&_tbvh, &_gpu_polymesh, _gpubvh->_indices, _gpubvh->_points);
+
+	//std::ofstream stream(ofToDataPath("polymesh.bin"), std::ios::binary);
+	//{
+	//	cereal::PortableBinaryOutputArchive o_archive(stream);
+	//	o_archive(_gpu_polymesh);
+	//}
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -553,15 +662,15 @@ void ofApp::draw() {
 		ofDrawSphere(ro, 0.02f);
 
 		float tmin = FLT_MAX;
-		if (intersect(_gpubvh->_bvh, ro, rd, _gpubvh->_indices, _gpubvh->_points, &tmin)) {
-			ofSetColor(ofColor::red);
-			ofDrawLine(ro, ro + rd * tmin);
-			ofDrawSphere(ro + rd * tmin, 0.02f);
-		}
-		else {
-			ofSetColor(ofColor::gray);
-			ofDrawLine(ro, ro + rd * 10.0f);
-		}
+		//if (intersect(_gpubvh->_bvh, ro, rd, _gpubvh->_indices, _gpubvh->_points, &tmin)) {
+		//	ofSetColor(ofColor::red);
+		//	ofDrawLine(ro, ro + rd * tmin);
+		//	ofDrawSphere(ro + rd * tmin, 0.02f);
+		//}
+		//else {
+		//	ofSetColor(ofColor::gray);
+		//	ofDrawLine(ro, ro + rd * 10.0f);
+		//}
 		//if (intersect_tbvh(&_tbvh, ro, rd, _gpubvh->_indices, _gpubvh->_points, &tmin)) {
 		//	ofSetColor(ofColor::red);
 		//	ofDrawLine(ro, ro + rd * tmin);
@@ -571,6 +680,41 @@ void ofApp::draw() {
 		//	ofSetColor(ofColor::gray);
 		//	ofDrawLine(ro, ro + rd * 10.0f);
 		//}
+		int primitive_index = 0;
+		if (intersect_gpu_tbvh(&_gpu_polymesh, ro, rd, &tmin, &primitive_index)) {
+			ofSetColor(ofColor::red);
+			ofDrawLine(ro, ro + rd * tmin);
+			ofDrawSphere(ro + rd * tmin, 0.01f);
+
+			glm::vec3 wo = -rd;
+
+			int v_index = primitive_index * 3;
+			glm::vec3 v0 = to(_gpu_polymesh.points[_gpu_polymesh.indices[v_index]]);
+			glm::vec3 v1 = to(_gpu_polymesh.points[_gpu_polymesh.indices[v_index + 1]]);
+			glm::vec3 v2 = to(_gpu_polymesh.points[_gpu_polymesh.indices[v_index + 2]]);
+			glm::vec3 Ng = glm::normalize(glm::cross(v1 - v0, v2 - v1));
+
+			if (glm::dot(wo, Ng) < 0.0f) {
+				Ng = -Ng;
+			}
+
+			glm::vec3 wi = glm::reflect(rd, Ng);
+			ro = ro + rd * tmin + wi * 1.0e-4f;
+			rd = wi;
+			if(intersect_gpu_tbvh(&_gpu_polymesh, ro, rd, &tmin, &primitive_index)) {
+				ofSetColor(ofColor::red);
+				ofDrawLine(ro, ro + rd * tmin);
+				ofDrawSphere(ro + rd * tmin, 0.01f);
+			}
+			else {
+				ofSetColor(ofColor::gray);
+				ofDrawLine(ro, ro + rd * 10.0f);
+			}
+		}
+		else {
+			ofSetColor(ofColor::gray);
+			ofDrawLine(ro, ro + rd * 10.0f);
+		}
 	}
 
 	//{
@@ -637,6 +781,9 @@ void ofApp::draw() {
 	
 	ImGui::InputInt("rays", &rays);
 	ImGui::InputFloat("height", &height, 0.1f);
+
+	ImGui::InputTextMultiline("camera_info", _gpubvh->camera_info, sizeof(_gpubvh->camera_info));
+
 	//ImGui::Separator();
 	//ImGui::Text("%d sample, fps = %.3f", _renderer->stepCount(), ofGetFrameRate());
 	//ImGui::Text("%d bad sample nan", _renderer->badSampleNanCount());

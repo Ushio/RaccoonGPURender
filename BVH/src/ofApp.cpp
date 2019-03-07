@@ -174,6 +174,14 @@ public:
 
 		//	_materials.emplace_back(m);
 		//}
+
+		auto uv = p->vertices.column_as_vector2("uv");
+		RT_ASSERT(uv);
+		for (uint32_t i = 0, n = p->vertices.rowCount(); i < n; ++i) {
+			glm::vec2 value;
+			uv->get(i, glm::value_ptr(value));
+			_point_uvs.emplace_back(value);
+		}
 	}
 	
 	std::shared_ptr<houdini_alembic::AlembicScene> _scene;
@@ -205,6 +213,7 @@ public:
 	}
 	std::vector<uint32_t> _indices;
 	std::vector<glm::vec3> _points;
+	std::vector<glm::vec2> _point_uvs;
 	std::vector<RTCBuildPrimitive> _primitives;
 	BVHNode *_bvh = nullptr;
 };
@@ -587,11 +596,17 @@ void ofApp::setup() {
 	build_threaded_bvh(_gpubvh->_bvh, &_tbvh);
 	build_gpu_tbvh(&_tbvh, &_gpu_polymesh, _gpubvh->_indices, _gpubvh->_points);
 
-	//std::ofstream stream(ofToDataPath("polymesh.bin"), std::ios::binary);
-	//{
-	//	cereal::PortableBinaryOutputArchive o_archive(stream);
-	//	o_archive(_gpu_polymesh);
-	//}
+	_gpu_polymesh.point_uvs.reserve(_gpubvh->_point_uvs.size());
+	for (int i = 0; i < _gpubvh->_point_uvs.size(); ++i) {
+		gpu::float4 uv = { _gpubvh->_point_uvs[i].x, _gpubvh->_point_uvs[i].y};
+		_gpu_polymesh.point_uvs.emplace_back(uv);
+	}
+	
+	std::ofstream stream(ofToDataPath("polymesh.bin"), std::ios::binary);
+	{
+		cereal::PortableBinaryOutputArchive o_archive(stream);
+		o_archive(_gpu_polymesh);
+	}
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();

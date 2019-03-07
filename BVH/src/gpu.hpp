@@ -31,6 +31,7 @@ namespace gpu {
 		std::vector<uint32_t> primitive_indices;
 		std::vector<uint32_t> indices;
 		std::vector<float4> points;
+		std::vector<float4> point_uvs;
 	};
 
 	template<class Archive>
@@ -62,7 +63,8 @@ namespace gpu {
 			cereal::make_nvp("nodes", polymesh.nodes),
 			cereal::make_nvp("primitive_indices", polymesh.primitive_indices),
 			cereal::make_nvp("indices", polymesh.indices),
-			cereal::make_nvp("points", polymesh.points)
+			cereal::make_nvp("points", polymesh.points),
+			cereal::make_nvp("point_uv", polymesh.point_uvs)
 		);
 	}
 }

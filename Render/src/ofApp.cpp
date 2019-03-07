@@ -3,6 +3,13 @@
 #include <CL/cl.h>
 #include "assertion.hpp"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb/stb_image_write.h"
+
+
 //inline ofPixels toOf(const rt::Image &image) {
 //	ofPixels pixels;
 //	pixels.allocate(image.width(), image.height(), OF_IMAGE_COLOR);
@@ -268,7 +275,124 @@ public:
 
 };
 
+
+struct XoroshiroPlus128 {
+	XoroshiroPlus128() {
+		splitmix sp;
+		sp.x = 38927482;
+		s[0] = std::max(sp.next(), 1ULL);
+		s[1] = std::max(sp.next(), 1ULL);
+	}
+	XoroshiroPlus128(uint64_t seed) {
+		splitmix sp;
+		sp.x = seed;
+		s[0] = std::max(sp.next(), 1ULL);
+		s[1] = std::max(sp.next(), 1ULL);
+	}
+	// 0.0 <= x < 1.0
+	double uniform() {
+		return uniform64f();
+	}
+	// a <= x < b
+	double uniform(double a, double b) {
+		return a + (b - a) * uniform64f();
+	}
+	double uniform64f() {
+		uint64_t x = next();
+		uint64_t bits = (0x3FFULL << 52) | (x >> 12);
+		return *reinterpret_cast<double *>(&bits) - 1.0;
+	}
+	float uniform32f() {
+		uint64_t x = next();
+		uint32_t bits = ((uint32_t)x >> 9) | 0x3f800000;
+		float value = *reinterpret_cast<float *>(&bits) - 1.0f;
+		return value;
+	}
+	/* This is the jump function for the generator. It is equivalent
+	to 2^64 calls to next(); it can be used to generate 2^64
+	non-overlapping subsequences for parallel computations. */
+	void jump() {
+		static const uint64_t JUMP[] = { 0xdf900294d8f554a5, 0x170865df4b3201fc };
+
+		uint64_t s0 = 0;
+		uint64_t s1 = 0;
+		for (int i = 0; i < sizeof JUMP / sizeof *JUMP; i++)
+		{
+			for (int b = 0; b < 64; b++) {
+				if (JUMP[i] & UINT64_C(1) << b) {
+					s0 ^= s[0];
+					s1 ^= s[1];
+				}
+				next();
+			}
+		}
+
+		s[0] = s0;
+		s[1] = s1;
+	}
+private:
+	// http://xoshiro.di.unimi.it/splitmix64.c
+	// for generate seed
+	struct splitmix {
+		uint64_t x = 0; /* The state can be seeded with any value. */
+		uint64_t next() {
+			uint64_t z = (x += 0x9e3779b97f4a7c15);
+			z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
+			z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
+			return z ^ (z >> 31);
+		}
+	};
+	uint64_t rotl(const uint64_t x, int k) const {
+		return (x << k) | (x >> (64 - k));
+	}
+	uint64_t next() {
+		const uint64_t s0 = s[0];
+		uint64_t s1 = s[1];
+		const uint64_t result = s0 + s1;
+
+		s1 ^= s0;
+		s[0] = rotl(s0, 24) ^ s1 ^ (s1 << 16); // a, b
+		s[1] = rotl(s1, 37); // c
+
+		return result;
+	}
+private:
+	uint64_t s[2];
+};
+
+
+struct EnvSampleCell {
+	float pdf = 0.0f;
+	float cdf_normalized_lower = 0.0f;
+	float phi_beg = 0.0f;
+	float phi_end = 0.0f;
+	float y_beg = 0.0f;
+	float y_end = 0.0f;
+
+	glm::vec3 color;
+};
+
+int env_sample_index(float x, const std::vector<EnvSampleCell> &cells) {
+	int beg = 0;
+	int end = cells.size();
+	int mid = end / 2;
+	while (1 < std::abs(end - beg)) {
+		if (x < cells[mid].cdf_normalized_lower) {
+			end = mid;
+		}
+		else {
+			beg = mid;
+		}
+		mid = (end + beg) / 2;
+	}
+	return beg;
+}
+
 GPURenderer *_renderer = nullptr;
+int _width;
+int _height;
+
+std::vector<EnvSampleCell> cells;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -292,7 +416,63 @@ void ofApp::setup() {
 
 	_camera_model.load("../../../scenes/camera_model.ply");
 
-	_renderer = new GPURenderer(_alembicscene);
+	// _renderer = new GPURenderer(_alembicscene);
+
+
+	int compornent_count;
+	std::unique_ptr<float, decltype(&stbi_image_free)> bitmap(stbi_loadf(ofToDataPath("spruit_sunrise_1k.hdr").c_str(), &_width, &_height, &compornent_count, 4), stbi_image_free);
+	float* pixels = bitmap.get();
+
+	float maxV = 200.0f;
+	// float maxV = 50;
+	std::vector<glm::vec3> env_values;
+	for (int i = 0, n = _width * _height * 4; i < n; i += 4) {
+		float r = std::min(pixels[i], maxV);
+		float g = std::min(pixels[i + 1], maxV);
+		float b = std::min(pixels[i + 2], maxV);
+
+		env_values.push_back(glm::vec3(r, g, b));
+	}
+
+	cells.resize(env_values.size());
+
+	float phi_step = 2.0f * CL_M_PI / _width;
+	float y_step = 2.0f / _height;
+
+	float sum = 0.0f;
+	for (int i = 0; i < cells.size(); ++i) {
+		float L = 0.2126f * env_values[i].x + 0.7152f * env_values[i].y + 0.0722f * env_values[i].z;
+		// float L = 1.0f;
+
+		// pdf is luminance
+		cells[i].pdf = L;
+
+		// cdf_normalized is un normalized
+		cells[i].cdf_normalized_lower = sum;
+
+		sum += L;
+
+		int x = i % _width;
+		int y = i / _width;
+		cells[i].phi_beg = x * phi_step;
+		cells[i].phi_end = (x + 1) * phi_step;
+		cells[i].y_beg = 1.0f - y * y_step;
+		cells[i].y_end = 1.0f - (y + 1) * y_step;
+
+		cells[i].color = env_values[i];
+	}
+
+	float cell_sr = (4.0 * CL_M_PI /* sr */) / cells.size();
+	for (int i = 0; i < cells.size(); ++i) {
+		// normalized
+		cells[i].cdf_normalized_lower /= sum;
+
+		// pdf is probability
+		cells[i].pdf /= sum;
+
+		// pdf is solid angle pdf
+		cells[i].pdf *= 1.0 / cell_sr;
+	}
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -347,48 +527,34 @@ void ofApp::draw() {
 
 	ofSetColor(255);
 
-	if (_alembicscene && show_scene_preview) {
-		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
-	}
-
-	//{
-	//	static ofMesh mesh;
-	//	mesh.clear();
-	//	mesh.setMode(OF_PRIMITIVE_TRIANGLES);
-	//	
-	//	for (auto p : _renderer->_points) {
-	//		mesh.addVertex(glm::vec3(p.x, p.y, p.z));
-	//	}
-
-	//	for (auto index : _renderer->_indices) {
-	//		mesh.addIndex(index);
-	//	}
-
-	//	// Houdini は CW
-	//	glFrontFace(GL_CW);
-	//	glEnable(GL_CULL_FACE);
-	//	{
-	//		// 表面を明るく
-	//		ofSetColor(128);
-	//		glCullFace(GL_BACK);
-	//		mesh.draw();
-
-	//		// 裏面を暗く
-	//		ofSetColor(32);
-	//		glCullFace(GL_FRONT);
-	//		mesh.draw();
-	//	}
-	//	glDisable(GL_CULL_FACE);
-
-	//	glEnable(GL_POLYGON_OFFSET_LINE);
-	//	glPolygonOffset(-0.1f, 1.0f);
-	//	ofSetColor(64);
-	//	mesh.clearColors();
-	//	mesh.drawWireframe();
-	//	glDisable(GL_POLYGON_OFFSET_LINE);
-
-	//	ofPopMatrix();
+	//if (_alembicscene && show_scene_preview) {
+	//	drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	//}
+
+	{
+		static ofMesh mesh;
+		mesh.clear();
+		mesh.setMode(OF_PRIMITIVE_POINTS);
+
+		static XoroshiroPlus128 random;
+		for (int i = 0; i < 10000; ++i) {
+			int index = env_sample_index(random.uniform32f(), cells);
+			float phi = cells[index].phi_beg + (cells[index].phi_end - cells[index].phi_beg) * random.uniform32f();
+			float y = cells[index].y_beg + (cells[index].y_end - cells[index].y_beg) * random.uniform32f();
+
+			float r_xz = std::sqrt(std::max(1.0f - y * y, 0.0f));
+			float x = r_xz * sin(phi);
+			float z = r_xz * cos(phi);
+
+			glm::vec3 wi(x, y, z);
+			mesh.addVertex(wi);
+
+			// mesh.addColor(ofFloatColor(cells[index].color.x, cells[index].color.y, cells[index].color.z));
+		}
+
+		ofSetColor(255);
+		mesh.draw();
+	}
 
 	_camera.end();
 

@@ -52,157 +52,227 @@ struct Material {
 	glm::vec3 Le;
 };
 
+inline cl_int opencl_platform_info(std::string &info_string, cl_platform_id platform_id, cl_platform_info info) {
+	size_t length;
+	cl_int status = clGetPlatformInfo(platform_id, info, 0, nullptr, &length);
+	if (status != CL_SUCCESS) {
+		return status;
+	}
+
+	std::vector<char> buffer(length);
+	status = clGetPlatformInfo(platform_id, info, length, buffer.data(), nullptr);
+	if (status != CL_SUCCESS) {
+		return status;
+	}
+	info_string = std::string(buffer.data());
+	return status;
+}
+inline cl_int opencl_device_info(std::string &info_string, cl_device_id device_id, cl_device_info info) {
+	size_t length;
+	cl_int status = clGetDeviceInfo(device_id, info, 0, nullptr, &length);
+	if (status != CL_SUCCESS) {
+		return status;
+	}
+
+	std::vector<char> buffer(length);
+	status = clGetDeviceInfo(device_id, info, length, buffer.data(), nullptr);
+	if (status != CL_SUCCESS) {
+		return status;
+	}
+	info_string = std::string(buffer.data());
+	return status;
+}
+
+// あとでちゃんとエラーハンドリング
+inline void opencl_callback(const char *errinfo, const void *private_info, size_t cb, void *user_data) {
+	printf("error callback : %s\n", errinfo);
+	RT_ASSERT(false);
+}
+static const char *kPLATFORM_NAME_NVIDIA = u8"NVIDIA CUDA";
+static const char *kPLATFORM_NAME_INTEL = u8"Intel(R) OpenCL";
+
 class OpenCLContext {
 public:
-	OpenCLContext() {
-		query_environment();
+	struct PlatformInfo {
+		std::string platform_profile;
+		std::string platform_version;
+		std::string platform_name;
+		std::string platform_vender;
+		std::string platform_extensions;
+	};
+	OpenCLContext(const char *target_platform_name) {
+#define REQUIRE(status, message) if(status == 0) { char buffer[512]; sprintf(buffer, "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
 
-		// 第一引数が本当にNULLでいいのかは後ほど確認
-		_context = clCreateContext(NULL, 1, &_nvidia_device, NULL, NULL, NULL);
-		RT_ASSERT(_context != nullptr);
-		_queue = clCreateCommandQueue(_context, _nvidia_device, 0, NULL);
-		RT_ASSERT(_queue != nullptr);
+		cl_int status;
+		cl_uint numOfPlatforms;
+		status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
+		REQUIRE(status == CL_SUCCESS, "clGetPlatformIDs() failed");
+		REQUIRE(numOfPlatforms != 0, "no available opencl platform");
+
+		std::vector<cl_platform_id> platforms(numOfPlatforms);
+		status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
+		REQUIRE(status == CL_SUCCESS, "clGetPlatformIDs() failed");
+
+		for (cl_platform_id platform : platforms)
+		{
+			PlatformInfo info;
+			status = opencl_platform_info(info.platform_profile, platform, CL_PLATFORM_PROFILE);  REQUIRE(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+			status = opencl_platform_info(info.platform_version, platform, CL_PLATFORM_VERSION);  REQUIRE(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+			status = opencl_platform_info(info.platform_name, platform, CL_PLATFORM_NAME);  REQUIRE(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+			status = opencl_platform_info(info.platform_vender, platform, CL_PLATFORM_VENDOR);  REQUIRE(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+			status = opencl_platform_info(info.platform_extensions, platform, CL_PLATFORM_EXTENSIONS);  REQUIRE(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+
+			if (info.platform_name == std::string(target_platform_name)) {
+				_platform = platform;
+				_platform_info = info;
+			}
+		}
+		REQUIRE(_platform != nullptr, "target platform not found");
+
+		cl_uint numOfDevices;
+		status = clGetDeviceIDs(_platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numOfDevices);
+		REQUIRE(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+		REQUIRE(0 < numOfDevices, "no available devices");
+
+		std::vector<cl_device_id> deviceIds(numOfDevices);
+		status = clGetDeviceIDs(_platform, CL_DEVICE_TYPE_ALL, numOfDevices, deviceIds.data(), nullptr);
+		REQUIRE(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+
+		_device = deviceIds[0];
+
+		// _device_name
+		status = opencl_device_info(_device_name, _device, CL_DEVICE_NAME);
+		REQUIRE(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+
+		cl_context_properties properties[] = {
+			CL_CONTEXT_PLATFORM, (cl_context_properties)_platform,
+			0
+		};
+
+		cl_context context = clCreateContext(properties, 1, &_device, opencl_callback, NULL, &status);
+		REQUIRE(status == CL_SUCCESS, "clCreateContext() failed");
+		REQUIRE(context != nullptr, "clCreateContext() failed");
+		_context = decltype(_context)(context, clReleaseContext);
+
+		cl_command_queue queue = clCreateCommandQueue(_context.get(), _device, 0, NULL);
+		REQUIRE(context != nullptr, "clCreateCommandQueue() failed");
+		_queue = decltype(_queue)(queue, clReleaseCommandQueue);
+
+
+#undef REQUIRE
 	}
 	~OpenCLContext() {
-		clReleaseContext(_context);
-		clReleaseCommandQueue(_queue);
+
 	}
 	OpenCLContext(const OpenCLContext&) = delete;
 	void operator=(const OpenCLContext&) = delete;
 
-	void query_environment() {
-		cl_int status;
-
-		cl_uint numOfPlatforms;
-		status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
-		RT_ASSERT(status == CL_SUCCESS);
-		RT_ASSERT(numOfPlatforms != 0);
-
-		std::vector<cl_platform_id> platforms(numOfPlatforms);
-		status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
-		RT_ASSERT(status == CL_SUCCESS);
-
-		for (cl_platform_id platform : platforms)
-		{
-			char info[1024];
-
-			status = clGetPlatformInfo(platform, CL_PLATFORM_NAME, sizeof(info), info, NULL);
-			RT_ASSERT(status == CL_SUCCESS);
-			printf("platform: %s", info);
-
-			if (strcmp(info, "NVIDIA CUDA") == 0) {
-				_nvidia_platform = platform;
-			}
-
-			status = clGetPlatformInfo(platform, CL_PLATFORM_VERSION, sizeof(info), info, NULL);
-			RT_ASSERT(status == CL_SUCCESS);
-			printf(", %s", info);
-
-			printf("\n");
-		}
-		RT_ASSERT(_nvidia_platform != nullptr);
-
-		cl_device_id deviceId[10];
-		cl_uint numOfDevices;
-
-		status = clGetDeviceIDs(_nvidia_platform, CL_DEVICE_TYPE_ALL, sizeof(deviceId) / sizeof(deviceId[0]), deviceId, &numOfDevices);
-		RT_ASSERT(status == CL_SUCCESS);
-		RT_ASSERT(numOfDevices != 0);
-		_nvidia_device = deviceId[0];
-
-		char info[1024];
-		clGetDeviceInfo(_nvidia_device, CL_DEVICE_NAME, sizeof(info), info, NULL);
-		printf("selected device : [%s]\n", info);
-	}
-
 	cl_context context() const {
-		return _context;
+		return _context.get();
 	}
 	cl_command_queue queue() const {
-		return _queue;
+		return _queue.get();
 	}
 	cl_device_id device() const {
-		return _nvidia_device;
+		return _device;
 	}
+	
+	PlatformInfo platform_info() const {
+		return _platform_info;
+	}
+	std::string device_name() const {
+		return _device_name;
+	}
+private:
+	cl_platform_id _platform = nullptr;
+	PlatformInfo _platform_info;
 
-	cl_platform_id _nvidia_platform = nullptr;
-	cl_device_id _nvidia_device = nullptr;
-	cl_context _context = nullptr;
-	cl_command_queue _queue = nullptr;
+	cl_device_id _device = nullptr;
+	std::string _device_name;
+
+	std::shared_ptr<std::remove_pointer<cl_context>::type> _context;
+	std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
 };
 
 class GPURenderer {
 public:
 	GPURenderer(std::shared_ptr<houdini_alembic::AlembicScene> scene):_scene(scene){
-		_context = std::shared_ptr<OpenCLContext>(new OpenCLContext());
-
-		std::string source = ofBufferFromFile("render.cl").getText();
-		const char *program_sources[] = { source.c_str() };
-
-		cl_program program = clCreateProgramWithSource(_context->context(), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, nullptr);
-		RT_ASSERT(program != nullptr);
-
-		// http://wiki.tommy6.net/wiki/clBuildProgram
-		std::string dataPath = ofToDataPath("", true);
-		std::stringstream option_stream;
-		option_stream << "-I " << ofToDataPath("", true);
-		option_stream << " ";
-		option_stream << "-cl-denorms-are-zero";
-		std::string options = option_stream.str();
-		cl_int status = clBuildProgram(program, 0, nullptr, options.c_str(), NULL, NULL);
-		if (status != CL_SUCCESS)
-		{
-			size_t length;
-			status = clGetProgramBuildInfo(program, _context->device(), CL_PROGRAM_BUILD_LOG, 0, NULL, &length);
-			RT_ASSERT(status == CL_SUCCESS);
-			
-			std::vector<char> buffer(length);
-			status = clGetProgramBuildInfo(program, _context->device(), CL_PROGRAM_BUILD_LOG, buffer.size(), buffer.data(), nullptr);
-			RT_ASSERT(status == CL_SUCCESS);
-			cout << buffer.data() << endl;
-			RT_ASSERT(0);
+		try {
+			auto p = new OpenCLContext(kPLATFORM_NAME_NVIDIA);
+		}
+		catch (std::exception &e) {
+			printf("opencl error, %s\n", e.what());
 		}
 
-		cl_kernel kernel = clCreateKernel(program, "add", NULL);
-		RT_ASSERT(kernel);
+		// _context = std::shared_ptr<NvidiaOpenCLContext>(new NvidiaOpenCLContext());
 
-		// create memory object
-		int N = 5;
-		std::vector<float> A = { 1, 2, 3, 4, 5 };
-		std::vector<float> B = { 5, 4, 3, 2, 1 };
-		cl_mem memA = clCreateBuffer(_context->context(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, N * sizeof(float), A.data(), NULL);
-		cl_mem memB = clCreateBuffer(_context->context(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, N * sizeof(float), B.data(), NULL);
-		cl_mem memC = clCreateBuffer(_context->context(), CL_MEM_WRITE_ONLY, N * sizeof(float), NULL, NULL);
-		RT_ASSERT(memA);
-		RT_ASSERT(memB);
-		RT_ASSERT(memC);
+		//std::string source = ofBufferFromFile("render.cl").getText();
+		//const char *program_sources[] = { source.c_str() };
 
-		// set kernel parameters
-		status = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memA);
-		RT_ASSERT(status == CL_SUCCESS);
-		status = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&memB);
-		RT_ASSERT(status == CL_SUCCESS);
-		status = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memC);
-		RT_ASSERT(status == CL_SUCCESS);
+		//cl_program program = clCreateProgramWithSource(_context->context(), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, nullptr);
+		//RT_ASSERT(program != nullptr);
 
-		size_t global_work_size[] = { N };
-		status = clEnqueueNDRangeKernel(_context->queue(), kernel, 1 /*dim*/, nullptr /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, nullptr);
-		RT_ASSERT(status == CL_SUCCESS);
+		//// http://wiki.tommy6.net/wiki/clBuildProgram
+		//std::string dataPath = ofToDataPath("", true);
+		//std::stringstream option_stream;
+		//option_stream << "-I " << ofToDataPath("", true);
+		//option_stream << " ";
+		//option_stream << "-cl-denorms-are-zero";
+		//std::string options = option_stream.str();
+		//cl_int status = clBuildProgram(program, 0, nullptr, options.c_str(), NULL, NULL);
+		//if (status != CL_SUCCESS)
+		//{
+		//	size_t length;
+		//	status = clGetProgramBuildInfo(program, _context->device(), CL_PROGRAM_BUILD_LOG, 0, NULL, &length);
+		//	RT_ASSERT(status == CL_SUCCESS);
+		//	
+		//	std::vector<char> buffer(length);
+		//	status = clGetProgramBuildInfo(program, _context->device(), CL_PROGRAM_BUILD_LOG, buffer.size(), buffer.data(), nullptr);
+		//	RT_ASSERT(status == CL_SUCCESS);
+		//	cout << buffer.data() << endl;
+		//	RT_ASSERT(0);
+		//}
 
-		// obtain results
-		std::vector<float> C(N);
+		//cl_kernel kernel = clCreateKernel(program, "add", NULL);
+		//RT_ASSERT(kernel);
 
-		// https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clEnqueueReadBuffer.html
-		status = clEnqueueReadBuffer(_context->queue(), memC, CL_TRUE /*blocking_read*/, 0, N * sizeof(float), C.data(), 0, NULL, NULL);
-		RT_ASSERT(status == CL_SUCCESS);
+		//// create memory object
+		//int N = 5;
+		//std::vector<float> A = { 1, 2, 3, 4, 5 };
+		//std::vector<float> B = { 5, 4, 3, 2, 1 };
+		//cl_mem memA = clCreateBuffer(_context->context(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, N * sizeof(float), A.data(), NULL);
+		//cl_mem memB = clCreateBuffer(_context->context(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, N * sizeof(float), B.data(), NULL);
+		//cl_mem memC = clCreateBuffer(_context->context(), CL_MEM_WRITE_ONLY, N * sizeof(float), NULL, NULL);
+		//RT_ASSERT(memA);
+		//RT_ASSERT(memB);
+		//RT_ASSERT(memC);
 
-		status = clFlush(_context->queue());
-		RT_ASSERT(status == CL_SUCCESS);
+		//// set kernel parameters
+		//status = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memA);
+		//RT_ASSERT(status == CL_SUCCESS);
+		//status = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&memB);
+		//RT_ASSERT(status == CL_SUCCESS);
+		//status = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memC);
+		//RT_ASSERT(status == CL_SUCCESS);
 
-		for (int i = 0; i < C.size(); ++i) {
-			printf("%f, ", C[i]);
-		}
-		printf("\n");
+		//size_t global_work_size[] = { N };
+		//status = clEnqueueNDRangeKernel(_context->queue(), kernel, 1 /*dim*/, nullptr /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, nullptr);
+		//RT_ASSERT(status == CL_SUCCESS);
+
+		//// obtain results
+		//std::vector<float> C(N);
+
+		//// https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clEnqueueReadBuffer.html
+		//status = clEnqueueReadBuffer(_context->queue(), memC, CL_TRUE /*blocking_read*/, 0, N * sizeof(float), C.data(), 0, NULL, NULL);
+		//RT_ASSERT(status == CL_SUCCESS);
+
+		//status = clFlush(_context->queue());
+		//RT_ASSERT(status == CL_SUCCESS);
+
+		//for (int i = 0; i < C.size(); ++i) {
+		//	printf("%f, ", C[i]);
+		//}
+		//printf("\n");
 
 		for (auto o : scene->objects) {
 			if (o->visible == false) {
@@ -270,9 +340,7 @@ public:
 	std::vector<glm::vec3> _points;
 	std::vector<Material> _materials;
 
-	std::shared_ptr<OpenCLContext> _context;
-
-
+	// std::shared_ptr<clCreateContext> _context;
 };
 
 
@@ -416,7 +484,7 @@ void ofApp::setup() {
 
 	_camera_model.load("../../../scenes/camera_model.ply");
 
-	// _renderer = new GPURenderer(_alembicscene);
+	_renderer = new GPURenderer(_alembicscene);
 
 
 	int compornent_count;

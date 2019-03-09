@@ -3,8 +3,6 @@
 #include "assertion.hpp"
 #include <embree3/rtcore.h>
 
-#include <glm/o>
-
 #include "gpu.hpp"
 
 inline void EmbreeErorrHandler(void* userPtr, RTCError code, const char* str) {

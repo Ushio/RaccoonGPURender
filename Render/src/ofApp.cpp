@@ -1,14 +1,13 @@
 ﻿#include "ofApp.h"
 
-#include <CL/cl.h>
-#include "assertion.hpp"
+#include "raccoon_ocl.hpp"
+#include "threaded_bvh.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
-
 
 //inline ofPixels toOf(const rt::Image &image) {
 //	ofPixels pixels;
@@ -47,490 +46,148 @@
 //	return pixels;
 //}
 
-struct Material {
-	glm::vec3 R;
-	glm::vec3 Le;
-};
-
-inline cl_int opencl_platform_info(std::string &info_string, cl_platform_id platform_id, cl_platform_info info) {
-	size_t length;
-	cl_int status = clGetPlatformInfo(platform_id, info, 0, nullptr, &length);
-	if (status != CL_SUCCESS) {
-		return status;
-	}
-
-	std::vector<char> buffer(length);
-	status = clGetPlatformInfo(platform_id, info, length, buffer.data(), nullptr);
-	if (status != CL_SUCCESS) {
-		return status;
-	}
-	info_string = std::string(buffer.data());
-	return status;
-}
-inline cl_int opencl_device_info(std::string &info_string, cl_device_id device_id, cl_device_info info) {
-	size_t length;
-	cl_int status = clGetDeviceInfo(device_id, info, 0, nullptr, &length);
-	if (status != CL_SUCCESS) {
-		return status;
-	}
-
-	std::vector<char> buffer(length);
-	status = clGetDeviceInfo(device_id, info, length, buffer.data(), nullptr);
-	if (status != CL_SUCCESS) {
-		return status;
-	}
-	info_string = std::string(buffer.data());
-	return status;
-}
-
-static const char *kPLATFORM_NAME_NVIDIA = u8"NVIDIA CUDA";
-static const char *kPLATFORM_NAME_INTEL = u8"Intel(R) OpenCL";
-
-#define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; sprintf(buffer, "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
-
-template <class T>
-class OpenCLBuffer {
-public:
-	OpenCLBuffer(cl_context context, cl_command_queue queue, T *value, uint32_t length)
-		: _context(context)
-		, _queue(queue)
-		, _length(length) {
-
-		cl_int status;
-		cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, length * sizeof(T), value, &status);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
-		REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
-		_memory = decltype(_memory)(memory, clReleaseMemObject);
-	}
-	cl_mem memory() const {
-		return _memory.get();
-	}
-	void read_immediately(T *value) {
-		cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_TRUE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
-	}
-private:
-	cl_context _context;
-	cl_command_queue _queue;
-
-	std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
-	uint32_t _length = 0;
-};
-
-class OpenCLContext {
-public:
-	struct PlatformInfo {
-		std::string platform_profile;
-		std::string platform_version;
-		std::string platform_name;
-		std::string platform_vender;
-		std::string platform_extensions;
+namespace rt {
+	struct Material {
+		glm::vec3 R;
+		glm::vec3 Le;
 	};
-	OpenCLContext(const char *target_platform_name) {
-		cl_int status;
-		cl_uint numOfPlatforms;
-		status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformIDs() failed");
-		REQUIRE_OR_EXCEPTION(numOfPlatforms != 0, "no available opencl platform");
 
-		std::vector<cl_platform_id> platforms(numOfPlatforms);
-		status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformIDs() failed");
+	class GPUScene {
+	public:
+		GPUScene(std::shared_ptr<houdini_alembic::AlembicScene> scene) :_scene(scene) {
+			try {
+				//using namespace rt;
 
-		for (cl_platform_id platform : platforms)
-		{
-			PlatformInfo info;
-			status = opencl_platform_info(info.platform_profile, platform, CL_PLATFORM_PROFILE);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-			status = opencl_platform_info(info.platform_version, platform, CL_PLATFORM_VERSION);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-			status = opencl_platform_info(info.platform_name, platform, CL_PLATFORM_NAME);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-			status = opencl_platform_info(info.platform_vender, platform, CL_PLATFORM_VENDOR);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-			status = opencl_platform_info(info.platform_extensions, platform, CL_PLATFORM_EXTENSIONS);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				//const char *kernel_src = INLINE_TEXT(
+				//	union Hoge {
+				//	int i;
+				//	char b;
+				//};
+				//__kernel void sin_sin(__global float *input, __global float *output) {
+				//	int gid = get_global_id(0);
+				//	float value = input[gid];
+				//	for (int i = 0; i < 100; ++i) {
+				//		value = sin(value);
+				//	}
+				//	output[gid] = value;
+				//}
+				//);
 
-			if (info.platform_name == std::string(target_platform_name)) {
-				_platform = platform;
-				_platform_info = info;
+				//OpenCLKernel kernel(kernel_src, kPLATFORM_NAME_NVIDIA);
+				//kernel.selectKernel("sin_sin");
+
+				//std::vector<float> inputs(10000000, 0.0f);
+				//for (int i = 0; i < inputs.size(); ++i) {
+				//	inputs[i] = 0.1f * i;
+				//}
+				//std::vector<float> outputs(10000000, 0.0f);
+				//auto inputBuffer = kernel.context()->createBuffer(inputs.data(), inputs.size());
+				//auto outputBuffer = kernel.context()->createBuffer(outputs.data(), outputs.size());
+
+				//kernel.setGlobalArgument(0, *inputBuffer);
+				//kernel.setGlobalArgument(1, *outputBuffer);
+
+				//for (int i = 0; i < 100; ++i) {
+				//	double execution_ms = kernel.launch_and_wait(0, outputs.size());
+				//	printf("execution_ms %f\n", execution_ms);
+				//}
+
+				//outputBuffer->read_immediately(outputs.data());
+
+				//// Varidation
+				//for (int i = 0; i < inputs.size(); ++i) {
+				//	int gid = i;
+				//	float value = inputs[gid];
+				//	for (int i = 0; i < 100; ++i) {
+				//		value = sin(value);
+				//	}
+
+				//	RT_ASSERT(fabs(value - outputs[i]) < 1.0e-5f);
+				//}
+
+				//printf("done.\n");
 			}
+			catch (std::exception &e) {
+				printf("opencl error, %s\n", e.what());
+			}
+
+			for (auto o : scene->objects) {
+				if (o->visible == false) {
+					continue;
+				}
+
+				if (_camera == nullptr) {
+					if (auto camera = o.as_camera()) {
+						_camera = camera;
+					}
+				}
+
+				if (auto polymesh = o.as_polygonMesh()) {
+					addPolymesh(polymesh);
+				}
+			}
+			RT_ASSERT(_camera);
+
+			buildBVH();
 		}
-		REQUIRE_OR_EXCEPTION(_platform != nullptr, "target platform not found");
 
-		cl_uint numOfDevices;
-		status = clGetDeviceIDs(_platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numOfDevices);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
-		REQUIRE_OR_EXCEPTION(0 < numOfDevices, "no available devices");
+		void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
+			bool isTriangleMesh = std::all_of(p->faceCounts.begin(), p->faceCounts.end(), [](int32_t f) { return f == 3; });
+			if (isTriangleMesh == false) {
+				printf("skipped non-triangle mesh: %s\n", p->name.c_str());
+				return;
+			}
 
-		std::vector<cl_device_id> deviceIds(numOfDevices);
-		status = clGetDeviceIDs(_platform, CL_DEVICE_TYPE_ALL, numOfDevices, deviceIds.data(), nullptr);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+			glm::dmat4 xform;
+			for (int i = 0; i < 16; ++i) {
+				glm::value_ptr(xform)[i] = p->combinedXforms.value_ptr()[i];
+			}
+			glm::dmat3 xformInverseTransposed = glm::inverseTranspose(xform);
 
-		_device = deviceIds[0];
+			// add index
+			uint32_t base_index = _points.size();
+			for (auto index : p->indices) {
+				_indices.emplace_back(base_index + index);
+			}
+			// add vertex
+			_points.reserve(_points.size() + p->P.size());
+			for (auto srcP : p->P) {
+				glm::vec3 p = xform * glm::dvec4(srcP.x, srcP.y, srcP.z, 1.0);
+				_points.emplace_back(p);
+			}
 
-		// _device_name
-		status = opencl_device_info(_device_name, _device, CL_DEVICE_NAME);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+			RT_ASSERT(std::all_of(_indices.begin(), _indices.end(), [&](uint32_t index) { return index < _points.size(); }));
 
-		cl_context_properties properties[] = {
-			CL_CONTEXT_PLATFORM, (cl_context_properties)_platform,
-			0
-		};
+			// add material
+			//auto Le = p->primitives.column_as_vector3("Le");
+			//auto Cd = p->primitives.column_as_vector3("Cd");
+			//RT_ASSERT(Le);
+			//RT_ASSERT(Cd);
+			//for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
+			//	Material m;
+			//	Le->get(i, glm::value_ptr(m.Le));
+			//	Cd->get(i, glm::value_ptr(m.Le));
 
-		// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateContext.html
-		cl_context context = clCreateContext(properties, 1, &_device, NULL, NULL, &status);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateContext() failed");
-		REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateContext() failed");
-		_context = decltype(_context)(context, clReleaseContext);
+			//	_materials.emplace_back(m);
+			//}
+		}
 
-		// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
-		cl_command_queue queue = clCreateCommandQueue(_context.get(), _device, CL_QUEUE_PROFILING_ENABLE, &status);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
-		REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
-		_queue = decltype(_queue)(queue, clReleaseCommandQueue);
-	}
-	~OpenCLContext() {
+		void buildBVH() {
+			_embreeBVH = buildEmbreeBVH(_indices, _points);
 
-	}
-	OpenCLContext(const OpenCLContext&) = delete;
-	void operator=(const OpenCLContext&) = delete;
+		}
 
-	cl_context context() const {
-		return _context.get();
-	}
-	cl_command_queue queue() const {
-		return _queue.get();
-	}
-	cl_device_id device() const {
-		return _device;
-	}
-	
-	PlatformInfo platform_info() const {
-		return _platform_info;
-	}
-	std::string device_name() const {
-		return _device_name;
-	}
+		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
+		houdini_alembic::CameraObject *_camera = nullptr;
 
-	template <class T>
-	std::shared_ptr<OpenCLBuffer<T>> createBuffer(T *value, uint32_t length) {
-		return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(_context.get(), _queue.get(), value, length));
-	}
-private:
-	cl_platform_id _platform = nullptr;
-	PlatformInfo _platform_info;
-
-	cl_device_id _device = nullptr;
-	std::string _device_name;
-
-	std::shared_ptr<std::remove_pointer<cl_context>::type> _context;
-	std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
-};
-
-inline cl_int opencl_build_log(std::string &log, cl_program program, cl_device_id device) {
-	size_t length;
-	cl_int status = clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, NULL, &length);
-	if (status != CL_SUCCESS) {
-		return status;
-	}
-
-	std::vector<char> buffer(length);
-	status = clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, length, buffer.data(), nullptr);
-	if (status != CL_SUCCESS) {
-		return status;
-	}
-	log = std::string(buffer.data());
-	return status;
+		std::vector<uint32_t> _indices;
+		std::vector<glm::vec3> _points;
+		std::vector<Material> _materials;
+		std::shared_ptr<EmbreeBVH> _embreeBVH;
+		std::vector<uint32_t> _primitive_indices;
+	};
 }
 
-class OpenCLKernel {
-public:
-	void construct(const char *kernel_source) {
-		std::stringstream option_stream;
-		// option_stream << "-I " << ofToDataPath("", true);
-		// option_stream << " ";
-		option_stream << "-cl-denorms-are-zero";
-		std::string options = option_stream.str();
-
-		const char *program_sources[] = { kernel_source };
-
-		cl_int status;
-		cl_program program = clCreateProgramWithSource(_context->context(), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateProgramWithSource() failed");
-		REQUIRE_OR_EXCEPTION(program, "clCreateProgramWithSource() failed");
-
-		_program = decltype(_program)(program, clReleaseProgram);
-
-		status = clBuildProgram(program, 0, nullptr, options.c_str(), NULL, NULL);
-		if (status == CL_BUILD_PROGRAM_FAILURE) {
-			std::string build_log;
-			status = opencl_build_log(build_log, program, _context->device());
-			printf("%s", build_log.c_str());
-			REQUIRE_OR_EXCEPTION(false, build_log.c_str());
-		}
-		else if (status != CL_SUCCESS) {
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clBuildProgram() failed");
-		}
-	}
-	OpenCLKernel(const char *kernel_source, const char *platfrom_name) {
-		_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(platfrom_name));
-		construct(kernel_source);
-	}
-	OpenCLKernel(const char *kernel_source, std::shared_ptr<OpenCLContext> context):_context(context){
-		construct(kernel_source);
-	}
-
-	void selectKernel(const char *kernel) {
-		cl_int status;
-		cl_kernel k = clCreateKernel(_program.get(), kernel, &status);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateKernel() failed");
-		_kernel = decltype(_kernel)(k, clReleaseKernel);
-	}
-
-	template <class T>
-	void setValueArgument(int i, T value) {
-		REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
-
-		cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(value), &value);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
-	}
-
-	template <class T>
-	void setGlobalArgument(int i, const OpenCLBuffer<T> &buffer) {
-		REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
-
-		auto memory_object = buffer.memory();
-		cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(memory_object), &memory_object);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
-	}
-	
-	// return kernel execution time miliseconds
-	double launch_and_wait(uint32_t offset, uint32_t length) {
-		REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
-
-		cl_event kernel_event;
-		size_t global_work_offset[] = { offset };
-		size_t global_work_size[] = { length };
-		cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
-		
-		// Time Profile
-		status = clWaitForEvents(1, &kernel_event);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
-
-		cl_ulong ev_beg_time_nano = 0;
-		cl_ulong ev_end_time_nano = 0;
-
-		status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &ev_beg_time_nano, NULL);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
-
-		status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
-
-		cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
-		double delta_ms = delta_time_nano * 0.001 * 0.001;
-		return delta_ms;
-	}
-
-	std::shared_ptr<OpenCLContext> context() {
-		return _context;
-	}
-private:
-	std::shared_ptr<OpenCLContext> _context;
-	std::shared_ptr<std::remove_pointer<cl_program>::type> _program;
-	std::shared_ptr<std::remove_pointer<cl_kernel>::type> _kernel;
-};
-
-#define INLINE_TEXT(str) #str
-
-class GPURenderer {
-public:
-	GPURenderer(std::shared_ptr<houdini_alembic::AlembicScene> scene):_scene(scene){
-		try {
-			// auto p = new OpenCLContext(kPLATFORM_NAME_NVIDIA);
-			const char *kernel_src = INLINE_TEXT(
-				__kernel void sin_sin(__global float *input, __global float *output) {
-					int gid = get_global_id(0);
-					float value = input[gid];
-					for (int i = 0; i < 100; ++i) {
-						value = sin(value);
-					}
-					output[gid] = value;
-				}
-			);
-
-			OpenCLKernel kernel(kernel_src, kPLATFORM_NAME_NVIDIA);
-			kernel.selectKernel("sin_sin");
-
-			std::vector<float> inputs(10000000, 0.0f);
-			for (int i = 0; i < inputs.size(); ++i) {
-				inputs[i] = 0.1f * i;
-			}
-			std::vector<float> outputs(10000000, 0.0f);
-			auto inputBuffer = kernel.context()->createBuffer(inputs.data(), inputs.size());
-			auto outputBuffer = kernel.context()->createBuffer(outputs.data(), outputs.size());
-
-			kernel.setGlobalArgument(0, *inputBuffer);
-			kernel.setGlobalArgument(1, *outputBuffer);
-	
-			for (int i = 0; i < 100; ++i) {
-				double execution_ms = kernel.launch_and_wait(0, outputs.size());
-				printf("execution_ms %f\n", execution_ms);
-			}
-
-			outputBuffer->read_immediately(outputs.data());
-
-			// Varidation
-			for (int i = 0; i < inputs.size(); ++i) {
-				int gid = i;
-				float value = inputs[gid];
-				for (int i = 0; i < 100; ++i) {
-					value = sin(value);
-				}
-
-				RT_ASSERT(fabs(value - outputs[i]) < 1.0e-5f);
-			}
-
-			printf("done.\n");
-		}
-		catch (std::exception &e) {
-			printf("opencl error, %s\n", e.what());
-		}
-
-		// _context = std::shared_ptr<NvidiaOpenCLContext>(new NvidiaOpenCLContext());
-
-		//std::string source = ofBufferFromFile("render.cl").getText();
-		//const char *program_sources[] = { source.c_str() };
-
-		//cl_program program = clCreateProgramWithSource(_context->context(), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, nullptr);
-		//RT_ASSERT(program != nullptr);
-
-		//// http://wiki.tommy6.net/wiki/clBuildProgram
-		//std::string dataPath = ofToDataPath("", true);
-		//std::stringstream option_stream;
-		//option_stream << "-I " << ofToDataPath("", true);
-		//option_stream << " ";
-		//option_stream << "-cl-denorms-are-zero";
-		//std::string options = option_stream.str();
-		//cl_int status = clBuildProgram(program, 0, nullptr, options.c_str(), NULL, NULL);
-		//if (status != CL_SUCCESS)
-		//{
-		//	size_t length;
-		//	status = clGetProgramBuildInfo(program, _context->device(), CL_PROGRAM_BUILD_LOG, 0, NULL, &length);
-		//	RT_ASSERT(status == CL_SUCCESS);
-		//	
-		//	std::vector<char> buffer(length);
-		//	status = clGetProgramBuildInfo(program, _context->device(), CL_PROGRAM_BUILD_LOG, buffer.size(), buffer.data(), nullptr);
-		//	RT_ASSERT(status == CL_SUCCESS);
-		//	cout << buffer.data() << endl;
-		//	RT_ASSERT(0);
-		//}
-
-		//cl_kernel kernel = clCreateKernel(program, "add", NULL);
-		//RT_ASSERT(kernel);
-
-		//// create memory object
-		//int N = 5;
-		//std::vector<float> A = { 1, 2, 3, 4, 5 };
-		//std::vector<float> B = { 5, 4, 3, 2, 1 };
-		//cl_mem memA = clCreateBuffer(_context->context(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, N * sizeof(float), A.data(), NULL);
-		//cl_mem memB = clCreateBuffer(_context->context(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, N * sizeof(float), B.data(), NULL);
-		//cl_mem memC = clCreateBuffer(_context->context(), CL_MEM_WRITE_ONLY, N * sizeof(float), NULL, NULL);
-		//RT_ASSERT(memA);
-		//RT_ASSERT(memB);
-		//RT_ASSERT(memC);
-
-		//// set kernel parameters
-		//status = clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memA);
-		//RT_ASSERT(status == CL_SUCCESS);
-		//status = clSetKernelArg(kernel, 1, sizeof(cl_mem), (void *)&memB);
-		//RT_ASSERT(status == CL_SUCCESS);
-		//status = clSetKernelArg(kernel, 2, sizeof(cl_mem), (void *)&memC);
-		//RT_ASSERT(status == CL_SUCCESS);
-
-		//size_t global_work_size[] = { N };
-		//status = clEnqueueNDRangeKernel(_context->queue(), kernel, 1 /*dim*/, nullptr /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, nullptr);
-		//RT_ASSERT(status == CL_SUCCESS);
-
-		//// obtain results
-		//std::vector<float> C(N);
-
-		//// https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/clEnqueueReadBuffer.html
-		//status = clEnqueueReadBuffer(_context->queue(), memC, CL_TRUE /*blocking_read*/, 0, N * sizeof(float), C.data(), 0, NULL, NULL);
-		//RT_ASSERT(status == CL_SUCCESS);
-
-		//status = clFlush(_context->queue());
-		//RT_ASSERT(status == CL_SUCCESS);
-
-		//for (int i = 0; i < C.size(); ++i) {
-		//	printf("%f, ", C[i]);
-		//}
-		//printf("\n");
-
-		for (auto o : scene->objects) {
-			if (o->visible == false) {
-				continue;
-			}
-
-			if (_camera == nullptr) {
-				if (auto camera = o.as_camera()) {
-					_camera = camera;
-				}
-			}
-
-			if (auto polymesh = o.as_polygonMesh()) {
-				addPolymesh(polymesh);
-			}
-		}
-		RT_ASSERT(_camera);
-	}
-
-	void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
-		bool isTriangleMesh = std::all_of(p->faceCounts.begin(), p->faceCounts.end(), [](int32_t f) { return f == 3; });
-		if (isTriangleMesh == false) {
-			printf("skipped non-triangle mesh: %s\n", p->name.c_str());
-			return;
-		}
-
-		glm::dmat4 xform;
-		for (int i = 0; i < 16; ++i) {
-			glm::value_ptr(xform)[i] = p->combinedXforms.value_ptr()[i];
-		}
-		glm::dmat3 xformInverseTransposed = glm::inverseTranspose(xform);
-
-		// add index
-		uint32_t base_index = _points.size();
-		for (auto index : p->indices) {
-			_indices.emplace_back(base_index + index);
-		}
-		// add vertex
-		_points.reserve(_points.size() + p->P.size());
-		for (auto srcP : p->P) {
-			glm::vec3 p = xform * glm::dvec4(srcP.x, srcP.y, srcP.z, 1.0);
-			_points.emplace_back(p);
-		}
-
-		RT_ASSERT(std::all_of(_indices.begin(), _indices.end(), [&](uint32_t index) { return index < _points.size(); }));
-
-		// add material
-		auto Le = p->primitives.column_as_vector3("Le");
-		auto Cd = p->primitives.column_as_vector3("Cd");
-		RT_ASSERT(Le);
-		RT_ASSERT(Cd);
-		for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
-			Material m;
-			Le->get(i, glm::value_ptr(m.Le));
-			Cd->get(i, glm::value_ptr(m.Le));
-
-			_materials.emplace_back(m);
-		}
-	}
-
-	std::shared_ptr<houdini_alembic::AlembicScene> _scene;
-	houdini_alembic::CameraObject *_camera = nullptr;
-
-	std::vector<uint32_t> _indices;
-	std::vector<glm::vec3> _points;
-	std::vector<Material> _materials;
-
-	// std::shared_ptr<clCreateContext> _context;
-};
 
 
 struct XoroshiroPlus128 {
@@ -645,7 +302,7 @@ int env_sample_index(float x, const std::vector<EnvSampleCell> &cells) {
 	return beg;
 }
 
-GPURenderer *_renderer = nullptr;
+rt::GPUScene *_gpuScene = nullptr;
 int _width;
 int _height;
 
@@ -673,7 +330,7 @@ void ofApp::setup() {
 
 	_camera_model.load("../../../scenes/camera_model.ply");
 
-	_renderer = new GPURenderer(_alembicscene);
+	_gpuScene = new rt::GPUScene(_alembicscene);
 
 
 	int compornent_count;

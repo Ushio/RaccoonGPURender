@@ -301,7 +301,7 @@ inline bool isPowerOfTwo(uint32_t n) {
 
 //--------------------------------------------------------------
 void ofApp::draw() {
-	static bool show_scene_preview = true;
+	static bool show_scene_preview = false;
 
 	if (_gpuScene) {
 		_gpuScene->step();

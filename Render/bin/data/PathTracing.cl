@@ -259,13 +259,7 @@ float3 lambertian_brdf(float3 wi, float3 wo, float3 Cd, float3 Ng) {
 	return Cd / (float)M_PI;
 }
 
-#define USE_RUNGHOLT 1
-
-#if USE_RUNGHOLT
-#define ITERATION 1
-#else
-#define ITERATION 2
-#endif
+#define ITERATION 10
 
 __kernel
 void PathTracing(

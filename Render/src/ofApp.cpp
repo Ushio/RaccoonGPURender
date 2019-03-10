@@ -333,7 +333,8 @@ inline bool isPowerOfTwo(uint32_t n) {
 //--------------------------------------------------------------
 void ofApp::draw() {
 	static bool show_scene_preview = true;
-	static int frame = 0;
+	static int rays = 1;
+	static float height = 5.0f;
 
 	//if (_renderer) {
 	//	_renderer->step();
@@ -370,59 +371,59 @@ void ofApp::draw() {
 
 	ofSetColor(255);
 
-	rt::AABB aabb;
-	aabb.lower = glm::vec3(-1.0f);
-	aabb.upper = glm::vec3(+1.0f);
+	//rt::AABB aabb;
+	//aabb.lower = glm::vec3(-1.0f);
+	//aabb.upper = glm::vec3(+1.0f);
 
-	draw_bounds(aabb);
+	//draw_bounds(aabb);
 
-	rt::XoroshiroPlus128 random;
-	for (int i = 0; i < 30; ++i) {
-		glm::vec3 ro(
-			random.uniform(-1.5f, 1.5f),
-			random.uniform(-1.5f, 1.5f),
-			random.uniform(-1.5f, 1.5f)
-		);
+	//rt::XoroshiroPlus128 random;
+	//for (int i = 0; i < 30; ++i) {
+	//	glm::vec3 ro(
+	//		random.uniform(-1.5f, 1.5f),
+	//		random.uniform(-1.5f, 1.5f),
+	//		random.uniform(-1.5f, 1.5f)
+	//	);
 
-		glm::vec3 to(
-			random.uniform(-1.5f, 1.5f),
-			random.uniform(-1.5f, 1.5f),
-			random.uniform(-1.5f, 1.5f)
-		);
-		glm::vec3 rd = glm::normalize(to - ro);
-		glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
+	//	glm::vec3 to(
+	//		random.uniform(-1.5f, 1.5f),
+	//		random.uniform(-1.5f, 1.5f),
+	//		random.uniform(-1.5f, 1.5f)
+	//	);
+	//	glm::vec3 rd = glm::normalize(to - ro);
+	//	glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
 
-		if (rt::slabs(aabb.lower, aabb.upper, ro, one_over_rd, FLT_MAX)) {
-			// float t = glm::compMin(tmin);
+	//	if (rt::slabs(aabb.lower, aabb.upper, ro, one_over_rd, FLT_MAX)) {
+	//		// float t = glm::compMin(tmin);
 
-			//float t = FLT_MAX;
-			//for (int i = 0; i < 3; ++i) {
-			//	if (0.0f < tmin[i]) {
-			//		t = std::min(tmin[i], t);
-			//	}
-			//}
+	//		//float t = FLT_MAX;
+	//		//for (int i = 0; i < 3; ++i) {
+	//		//	if (0.0f < tmin[i]) {
+	//		//		t = std::min(tmin[i], t);
+	//		//	}
+	//		//}
 
-			//ofSetColor(255);
-			//ofDrawSphere(ro, 0.02f);
-			//ofSetColor(255, 0, 0);
-			//ofDrawLine(ro, ro + rd * t);
-			//ofDrawSphere(ro + rd * t, 0.02f);
+	//		//ofSetColor(255);
+	//		//ofDrawSphere(ro, 0.02f);
+	//		//ofSetColor(255, 0, 0);
+	//		//ofDrawLine(ro, ro + rd * t);
+	//		//ofDrawSphere(ro + rd * t, 0.02f);
 
-			ofSetColor(255);
-			ofDrawSphere(ro, 0.01f);
-			ofSetColor(255, 0, 0);
-			if (show_scene_preview) {
-				ofDrawLine(ro, ro + rd * 5.0f);
-			}
+	//		ofSetColor(255);
+	//		ofDrawSphere(ro, 0.01f);
+	//		ofSetColor(255, 0, 0);
+	//		if (show_scene_preview) {
+	//			ofDrawLine(ro, ro + rd * 5.0f);
+	//		}
 
-		}
-		else {
-			ofSetColor(255);
-			ofDrawSphere(ro, 0.01f);
-			ofSetColor(255);
-			ofDrawLine(ro, ro + rd * 5.0f);
-		}
-	}
+	//	}
+	//	else {
+	//		ofSetColor(255);
+	//		ofDrawSphere(ro, 0.01f);
+	//		ofSetColor(255);
+	//		ofDrawLine(ro, ro + rd * 5.0f);
+	//	}
+	//}
 
 	//if (_alembicscene && show_scene_preview) {
 	//	drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
@@ -452,6 +453,42 @@ void ofApp::draw() {
 	//	ofSetColor(255);
 	//	mesh.draw();
 	//}
+	
+	if (_alembicscene && show_scene_preview) {
+		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
+	}
+	//draw_bvh(_gpubvh->_bvh);
+
+	for (int i = 0; i < rays; ++i) {
+		float theta = ofMap(i, 0, rays, 0, 2.0f * glm::pi<float>());
+		glm::vec3 ro(5.0f * sin(theta), height, 5.0f * cos(theta));
+		glm::vec3 rd = glm::normalize(glm::vec3(0.0f, 2.0f, 0.0f) - ro);
+
+		ofSetColor(ofColor::gray);
+		ofDrawSphere(ro, 0.02f);
+
+		float tmin = FLT_MAX;
+		if (intersect_reference(_gpuScene->_embreeBVH->bvh_root, ro, rd, _gpuScene->_indices, _gpuScene->_points, &tmin)) {
+			ofSetColor(ofColor::red);
+			ofDrawLine(ro, ro + rd * tmin);
+			ofDrawSphere(ro + rd * tmin, 0.02f);
+		}
+		else {
+			ofSetColor(ofColor::gray);
+			ofDrawLine(ro, ro + rd * 10.0f);
+		}
+
+		//if (intersect_tbvh(&_tbvh, ro, rd, _gpubvh->_indices, _gpubvh->_points, &tmin)) {
+		//	ofSetColor(ofColor::red);
+		//	ofDrawLine(ro, ro + rd * tmin);
+		//	ofDrawSphere(ro + rd * tmin, 0.02f);
+		//}
+		//else {
+		//	ofSetColor(ofColor::gray);
+		//	ofDrawLine(ro, ro + rd * 10.0f);
+		//}
+	}
+
 
 	_camera.end();
 
@@ -475,8 +512,10 @@ void ofApp::draw() {
 
 	ImGui::Begin("settings", nullptr);
 	ImGui::Checkbox("scene preview", &show_scene_preview);
+
+	ImGui::InputInt("rays", &rays);
+	ImGui::InputFloat("height", &height, 0.1f);
 	
-	ImGui::Text("frame : %d", frame);
 	//ImGui::Separator();
 	//ImGui::Text("%d sample, fps = %.3f", _renderer->stepCount(), ofGetFrameRate());
 	//ImGui::Text("%d bad sample nan", _renderer->badSampleNanCount());

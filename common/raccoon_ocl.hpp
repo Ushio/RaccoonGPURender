@@ -51,6 +51,7 @@ namespace rt {
 			, _queue(queue)
 			, _length(length) {
 
+			// 
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, length * sizeof(T), value, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
@@ -232,7 +233,7 @@ namespace rt {
 		double launch_and_wait(uint32_t offset, uint32_t length) {
 			REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
 
-			cl_event kernel_event;
+			cl_event kernel_event = 0;
 			size_t global_work_offset[] = { offset };
 			size_t global_work_size[] = { length };
 			cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
@@ -250,6 +251,9 @@ namespace rt {
 
 			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+
+			status = clReleaseEvent(kernel_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clReleaseEvent() failed");
 
 			cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
 			double delta_ms = delta_time_nano * 0.001 * 0.001;

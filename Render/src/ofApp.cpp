@@ -2,6 +2,7 @@
 
 #include "raccoon_ocl.hpp"
 #include "threaded_bvh.hpp"
+#include "peseudo_random.hpp"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -188,93 +189,6 @@ namespace rt {
 	};
 }
 
-
-
-struct XoroshiroPlus128 {
-	XoroshiroPlus128() {
-		splitmix sp;
-		sp.x = 38927482;
-		s[0] = std::max(sp.next(), 1ULL);
-		s[1] = std::max(sp.next(), 1ULL);
-	}
-	XoroshiroPlus128(uint64_t seed) {
-		splitmix sp;
-		sp.x = seed;
-		s[0] = std::max(sp.next(), 1ULL);
-		s[1] = std::max(sp.next(), 1ULL);
-	}
-	// 0.0 <= x < 1.0
-	double uniform() {
-		return uniform64f();
-	}
-	// a <= x < b
-	double uniform(double a, double b) {
-		return a + (b - a) * uniform64f();
-	}
-	double uniform64f() {
-		uint64_t x = next();
-		uint64_t bits = (0x3FFULL << 52) | (x >> 12);
-		return *reinterpret_cast<double *>(&bits) - 1.0;
-	}
-	float uniform32f() {
-		uint64_t x = next();
-		uint32_t bits = ((uint32_t)x >> 9) | 0x3f800000;
-		float value = *reinterpret_cast<float *>(&bits) - 1.0f;
-		return value;
-	}
-	/* This is the jump function for the generator. It is equivalent
-	to 2^64 calls to next(); it can be used to generate 2^64
-	non-overlapping subsequences for parallel computations. */
-	void jump() {
-		static const uint64_t JUMP[] = { 0xdf900294d8f554a5, 0x170865df4b3201fc };
-
-		uint64_t s0 = 0;
-		uint64_t s1 = 0;
-		for (int i = 0; i < sizeof JUMP / sizeof *JUMP; i++)
-		{
-			for (int b = 0; b < 64; b++) {
-				if (JUMP[i] & UINT64_C(1) << b) {
-					s0 ^= s[0];
-					s1 ^= s[1];
-				}
-				next();
-			}
-		}
-
-		s[0] = s0;
-		s[1] = s1;
-	}
-private:
-	// http://xoshiro.di.unimi.it/splitmix64.c
-	// for generate seed
-	struct splitmix {
-		uint64_t x = 0; /* The state can be seeded with any value. */
-		uint64_t next() {
-			uint64_t z = (x += 0x9e3779b97f4a7c15);
-			z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9;
-			z = (z ^ (z >> 27)) * 0x94d049bb133111eb;
-			return z ^ (z >> 31);
-		}
-	};
-	uint64_t rotl(const uint64_t x, int k) const {
-		return (x << k) | (x >> (64 - k));
-	}
-	uint64_t next() {
-		const uint64_t s0 = s[0];
-		uint64_t s1 = s[1];
-		const uint64_t result = s0 + s1;
-
-		s1 ^= s0;
-		s[0] = rotl(s0, 24) ^ s1 ^ (s1 << 16); // a, b
-		s[1] = rotl(s1, 37); // c
-
-		return result;
-	}
-private:
-	uint64_t s[2];
-};
-
-
 struct EnvSampleCell {
 	float pdf = 0.0f;
 	float cdf_normalized_lower = 0.0f;
@@ -302,11 +216,20 @@ int env_sample_index(float x, const std::vector<EnvSampleCell> &cells) {
 	return beg;
 }
 
+void draw_bounds(const rt::AABB &aabb) {
+	auto size = aabb.upper - aabb.lower;
+	auto center = (aabb.upper + aabb.lower) * 0.5f;
+	ofNoFill();
+	ofDrawBox(center, size.x, size.y, size.z);
+	ofFill();
+}
+
 rt::GPUScene *_gpuScene = nullptr;
 int _width;
 int _height;
 
 std::vector<EnvSampleCell> cells;
+
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -401,6 +324,12 @@ inline bool isPowerOfTwo(uint32_t n) {
 	return (n & (n - 1)) == 0;
 }
 
+//float sdBox(glm::vec3 p, glm::vec3 b)
+//{
+//	glm::vec3 d = glm::abs(p) - b;
+//	return glm::length(glm::max(d, 0.0f)) + glm::min(glm::compMax(d), 0.0f);
+//}
+
 //--------------------------------------------------------------
 void ofApp::draw() {
 	static bool show_scene_preview = true;
@@ -441,34 +370,88 @@ void ofApp::draw() {
 
 	ofSetColor(255);
 
+	rt::AABB aabb;
+	aabb.lower = glm::vec3(-1.0f);
+	aabb.upper = glm::vec3(+1.0f);
+
+	draw_bounds(aabb);
+
+	rt::XoroshiroPlus128 random;
+	for (int i = 0; i < 30; ++i) {
+		glm::vec3 ro(
+			random.uniform(-1.5f, 1.5f),
+			random.uniform(-1.5f, 1.5f),
+			random.uniform(-1.5f, 1.5f)
+		);
+
+		glm::vec3 to(
+			random.uniform(-1.5f, 1.5f),
+			random.uniform(-1.5f, 1.5f),
+			random.uniform(-1.5f, 1.5f)
+		);
+		glm::vec3 rd = glm::normalize(to - ro);
+		glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
+
+		if (rt::slabs(aabb.lower, aabb.upper, ro, one_over_rd, FLT_MAX)) {
+			// float t = glm::compMin(tmin);
+
+			//float t = FLT_MAX;
+			//for (int i = 0; i < 3; ++i) {
+			//	if (0.0f < tmin[i]) {
+			//		t = std::min(tmin[i], t);
+			//	}
+			//}
+
+			//ofSetColor(255);
+			//ofDrawSphere(ro, 0.02f);
+			//ofSetColor(255, 0, 0);
+			//ofDrawLine(ro, ro + rd * t);
+			//ofDrawSphere(ro + rd * t, 0.02f);
+
+			ofSetColor(255);
+			ofDrawSphere(ro, 0.01f);
+			ofSetColor(255, 0, 0);
+			if (show_scene_preview) {
+				ofDrawLine(ro, ro + rd * 5.0f);
+			}
+
+		}
+		else {
+			ofSetColor(255);
+			ofDrawSphere(ro, 0.01f);
+			ofSetColor(255);
+			ofDrawLine(ro, ro + rd * 5.0f);
+		}
+	}
+
 	//if (_alembicscene && show_scene_preview) {
 	//	drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	//}
 
-	{
-		static ofMesh mesh;
-		mesh.clear();
-		mesh.setMode(OF_PRIMITIVE_POINTS);
+	//{
+	//	static ofMesh mesh;
+	//	mesh.clear();
+	//	mesh.setMode(OF_PRIMITIVE_POINTS);
 
-		static XoroshiroPlus128 random;
-		for (int i = 0; i < 10000; ++i) {
-			int index = env_sample_index(random.uniform32f(), cells);
-			float phi = cells[index].phi_beg + (cells[index].phi_end - cells[index].phi_beg) * random.uniform32f();
-			float y = cells[index].y_beg + (cells[index].y_end - cells[index].y_beg) * random.uniform32f();
+	//	static XoroshiroPlus128 random;
+	//	for (int i = 0; i < 10000; ++i) {
+	//		int index = env_sample_index(random.uniform32f(), cells);
+	//		float phi = cells[index].phi_beg + (cells[index].phi_end - cells[index].phi_beg) * random.uniform32f();
+	//		float y = cells[index].y_beg + (cells[index].y_end - cells[index].y_beg) * random.uniform32f();
 
-			float r_xz = std::sqrt(std::max(1.0f - y * y, 0.0f));
-			float x = r_xz * sin(phi);
-			float z = r_xz * cos(phi);
+	//		float r_xz = std::sqrt(std::max(1.0f - y * y, 0.0f));
+	//		float x = r_xz * sin(phi);
+	//		float z = r_xz * cos(phi);
 
-			glm::vec3 wi(x, y, z);
-			mesh.addVertex(wi);
+	//		glm::vec3 wi(x, y, z);
+	//		mesh.addVertex(wi);
 
-			// mesh.addColor(ofFloatColor(cells[index].color.x, cells[index].color.y, cells[index].color.z));
-		}
+	//		// mesh.addColor(ofFloatColor(cells[index].color.x, cells[index].color.y, cells[index].color.z));
+	//	}
 
-		ofSetColor(255);
-		mesh.draw();
-	}
+	//	ofSetColor(255);
+	//	mesh.draw();
+	//}
 
 	_camera.end();
 

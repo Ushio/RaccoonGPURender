@@ -138,6 +138,19 @@ namespace rt {
 		void buildBVH() {
 			_embreeBVH = buildEmbreeBVH(_indices, _points);
 			buildThreadedBVH(_tbvh, _primitive_indices, _embreeBVH->bvh_root);
+
+			// 無限ループの検知
+			for (int i = 0; i < _tbvh.size(); ++i) {
+				if (0 <= _tbvh[i].hit_link) {
+					// リンクは必ず後続のインデックスを持つ
+					RT_ASSERT(i < _tbvh[i].hit_link);
+				}
+
+				if (0 <= _tbvh[i].miss_link ) {
+					// リンクは必ず後続のインデックスを持つ
+					RT_ASSERT(i < _tbvh[i].miss_link);
+				}
+			}
 		}
 
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
@@ -190,6 +203,7 @@ void ofApp::setup() {
 	_camera_model.load("../../../scenes/camera_model.ply");
 
 	_BVHScene = new rt::BVHScene(_alembicscene);
+
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -307,35 +321,6 @@ void ofApp::draw() {
 		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	}
 
-	//{
-	//	static ofMesh mesh;
-	//	mesh.clear();
-	//	mesh.setMode(OF_PRIMITIVE_POINTS);
-
-	//	static XoroshiroPlus128 random;
-	//	for (int i = 0; i < 10000; ++i) {
-	//		int index = env_sample_index(random.uniform32f(), cells);
-	//		float phi = cells[index].phi_beg + (cells[index].phi_end - cells[index].phi_beg) * random.uniform32f();
-	//		float y = cells[index].y_beg + (cells[index].y_end - cells[index].y_beg) * random.uniform32f();
-
-	//		float r_xz = std::sqrt(std::max(1.0f - y * y, 0.0f));
-	//		float x = r_xz * sin(phi);
-	//		float z = r_xz * cos(phi);
-
-	//		glm::vec3 wi(x, y, z);
-	//		mesh.addVertex(wi);
-
-	//		// mesh.addColor(ofFloatColor(cells[index].color.x, cells[index].color.y, cells[index].color.z));
-	//	}
-
-	//	ofSetColor(255);
-	//	mesh.draw();
-	//}
-	
-	if (_alembicscene && show_scene_preview) {
-		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
-	}
-
 	for (int i = 0; i < _BVHScene->_rayCasts.size(); ++i) {
 		auto rayCast = _BVHScene->_rayCasts[i];
 		auto ro = rayCast.ro;
@@ -344,26 +329,11 @@ void ofApp::draw() {
 		ofSetColor(ofColor::gray);
 		ofDrawSphere(ro, 0.02f);
 
-		float tmin = FLT_MAX;
-		//if (intersect_bvh(_BVHScene->_embreeBVH->bvh_root, ro, rd, _BVHScene->_indices, _BVHScene->_points, &tmin)) {
-		//	ofSetColor(ofColor::red);
-
-		//	ofDrawLine(ro, ro + rd * tmin);
-		//	ofDrawSphere(ro + rd * tmin, 0.005f);
-
-		//	RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
-		//}
-		//else {
-		//	ofSetColor(ofColor::gray);
-		//	ofDrawLine(ro, ro + rd * 1.0f);
-
-		//	RT_ASSERT(rayCast.tmin == 0.0f);
-		//}
-		ofSetColor(ofColor::gray);
-		draw_bounds(_BVHScene->_tbvh[0].bounds);
-
-		uint32_t primitive_index;
-		if (intersect_tbvh(_BVHScene->_tbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index)) {
+		// Standard BVH
+		std::vector<int32_t> visited_bvh;
+		float tmin;
+		tmin = FLT_MAX;
+		if (intersect_bvh(_BVHScene->_embreeBVH->bvh_root, ro, rd, _BVHScene->_indices, _BVHScene->_points, &tmin, visited_bvh)) {
 			ofSetColor(ofColor::red);
 
 			ofDrawLine(ro, ro + rd * tmin);
@@ -377,6 +347,31 @@ void ofApp::draw() {
 
 			RT_ASSERT(rayCast.tmin == 0.0f);
 		}
+
+		ofSetColor(ofColor::gray);
+		draw_bounds(_BVHScene->_tbvh[0].bounds);
+
+		// Threaded BVH
+		uint32_t primitive_index;
+		std::vector<int32_t> visited_tbvh;
+		tmin = FLT_MAX;
+		if (intersect_tbvh(_BVHScene->_tbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_tbvh)) {
+			ofSetColor(ofColor::red);
+
+			ofDrawLine(ro, ro + rd * tmin);
+			ofDrawSphere(ro + rd * tmin, 0.005f);
+
+			RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+		}
+		else {
+			ofSetColor(ofColor::gray);
+			ofDrawLine(ro, ro + rd * 1.0f);
+
+			RT_ASSERT(rayCast.tmin == 0.0f);
+		}
+
+		// Visited Node is must be equals!
+		RT_ASSERT(visited_bvh == visited_tbvh);
 	}
 
 	//draw_bvh(_gpubvh->_bvh);

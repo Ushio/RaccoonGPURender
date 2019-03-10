@@ -33,7 +33,7 @@ namespace rt {
 		virtual BVHLeaf *leaf() { return nullptr; }
 
 		BVHBranch *parent = nullptr;
-		uint32_t index = 0;
+		int32_t index = 0;
 	};
 
 	class BVHBranch : public BVHNode {
@@ -214,13 +214,25 @@ namespace rt {
 	//	return false;
 	//}
 
-	inline void intersect_bvh_recursive(BVHNode *node, glm::vec3 ro, glm::vec3 rd, glm::vec3 one_over_rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, bool *intersected, float *tmin) {
+	// visited is node that AABB intersects checked
+	inline void intersect_bvh_recursive(BVHNode *node, glm::vec3 ro, glm::vec3 rd, glm::vec3 one_over_rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, bool *intersected, float *tmin, std::vector<int32_t> &visited) {
 		if (BVHBranch *branch = node->branch()) {
-			if (slabs(branch->L_bounds.lower, branch->L_bounds.upper, ro, one_over_rd, *tmin)) {
-				intersect_bvh_recursive(branch->L, ro, rd, one_over_rd, indices, points, intersected, tmin);
+			if (node->parent == nullptr) {
+				visited.push_back(node->index);
+				auto top_bounds = AABB_union(branch->L_bounds, branch->R_bounds);
+				if(slabs(top_bounds.lower, top_bounds.upper, ro, one_over_rd, *tmin) == false) {
+					return;
+				}
 			}
+
+			visited.push_back(branch->L->index);
+			if (slabs(branch->L_bounds.lower, branch->L_bounds.upper, ro, one_over_rd, *tmin)) {
+				intersect_bvh_recursive(branch->L, ro, rd, one_over_rd, indices, points, intersected, tmin, visited);
+			}
+
+			visited.push_back(branch->R->index);
 			if (slabs(branch->R_bounds.lower, branch->R_bounds.upper, ro, one_over_rd, *tmin)) {
-				intersect_bvh_recursive(branch->R, ro, rd, one_over_rd, indices, points, intersected, tmin);
+				intersect_bvh_recursive(branch->R, ro, rd, one_over_rd, indices, points, intersected, tmin, visited);
 			}
 		}
 		else
@@ -238,9 +250,9 @@ namespace rt {
 		}
 	}
 
-	inline bool intersect_bvh(BVHNode *node, glm::vec3 ro, glm::vec3 rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, float *tmin) {
+	inline bool intersect_bvh(BVHNode *node, glm::vec3 ro, glm::vec3 rd, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, float *tmin, std::vector<int32_t> &visited) {
 		bool intersected = false;
-		intersect_bvh_recursive(node, ro, rd, glm::vec3(1.0f) / rd, indices, points, &intersected, tmin);
+		intersect_bvh_recursive(node, ro, rd, glm::vec3(1.0f) / rd, indices, points, &intersected, tmin, visited);
 		return intersected;
 	}
 
@@ -284,7 +296,7 @@ namespace rt {
 		return parent_sibling;
 	}
 	inline void linkThreadedBVH(std::vector<TBVHNode> &tbvh, std::vector<uint32_t> &primitive_indices, BVHNode *node, AABB *bounds, BVHNode *sibling, BVHNode *parent_sibling) {
-		// hit link is always array neighbor node
+		// hit link is always array neighbor node, we must avoid out of range index
 		uint32_t neighbor = node->index + 1;
 		tbvh[node->index].hit_link = neighbor < tbvh.size() ? neighbor : -1;
 
@@ -343,12 +355,15 @@ namespace rt {
 		linkThreadedBVH(tbvh, primitive_indices, bvh, nullptr, nullptr, nullptr);
 	}
 
-	bool intersect_tbvh(const std::vector<TBVHNode> &tbvh, std::vector<uint32_t> &primitive_indices, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, glm::vec3 ro, glm::vec3 rd, float *tmin, uint32_t *primitive_index) {
+	// visited is node that AABB intersects checked
+	inline bool intersect_tbvh(const std::vector<TBVHNode> &tbvh, std::vector<uint32_t> &primitive_indices, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, glm::vec3 ro, glm::vec3 rd, float *tmin, uint32_t *primitive_index, std::vector<int32_t> &visited) {
 		glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
 		bool intersected = false;
 		int node = 0;
 		while (0 <= node) {
 			RT_ASSERT(node < tbvh.size());
+			visited.push_back(node);
+
 			auto bounds = tbvh[node].bounds;
 			if (slabs(bounds.lower, bounds.upper, ro, one_over_rd, *tmin)) {
 				for (int i = tbvh[node].primitive_indices_beg; i < tbvh[node].primitive_indices_end; ++i) {

@@ -6,6 +6,18 @@
 #include <CL/cl.h>
 #include "assertion.hpp"
 
+class Stopwatch {
+public:
+	Stopwatch() :_beginAt(std::chrono::high_resolution_clock::now()) {
+	}
+	double elapsed() const {
+		auto n = std::chrono::high_resolution_clock::now();
+		return (double)std::chrono::duration_cast<std::chrono::microseconds>(n - _beginAt).count() * 0.001 * 0.001;
+	}
+private:
+	std::chrono::high_resolution_clock::time_point _beginAt;
+};
+
 namespace rt {
 	static const char *kPLATFORM_NAME_NVIDIA = u8"NVIDIA CUDA";
 	static const char *kPLATFORM_NAME_INTEL = u8"Intel(R) OpenCL";
@@ -43,6 +55,32 @@ namespace rt {
 
 #define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; sprintf(buffer, "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
 
+	class OpenCLEvent {
+	public:
+		OpenCLEvent(cl_event e) :_event(e, clReleaseEvent) { }
+
+		double wait() {
+			auto e = _event.get();
+			cl_int status = clWaitForEvents(1, &e);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
+
+			cl_ulong ev_beg_time_nano = 0;
+			cl_ulong ev_end_time_nano = 0;
+
+			status = clGetEventProfilingInfo(e, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &ev_beg_time_nano, NULL);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+
+			status = clGetEventProfilingInfo(e, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+
+			cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
+			double delta_ms = delta_time_nano * 0.001 * 0.001;
+			return delta_ms;
+		}
+	private:
+		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
+	};
+
 	template <class T>
 	class OpenCLBuffer {
 	public:
@@ -61,9 +99,20 @@ namespace rt {
 		cl_mem memory() const {
 			return _memory.get();
 		}
-		void read_immediately(T *value) {
-			cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_TRUE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
+
+		//void read_immediately(T *value) {
+		//	cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_TRUE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+		//}
+
+		std::shared_ptr<OpenCLEvent> read(T *value) {
+			cl_event read_event;
+			Stopwatch sw;
+			cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, &read_event);
+			printf("step %.5f ms\n", sw.elapsed());
+
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(read_event));
 		}
 	private:
 		cl_context _context;
@@ -194,7 +243,7 @@ namespace rt {
 		log = std::string(buffer.data());
 		return status;
 	}
-
+	
 	class OpenCLKernel {
 	public:
 		OpenCLKernel(const char *kernel_source, const char *platfrom_name) {
@@ -229,6 +278,14 @@ namespace rt {
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
 
+		std::shared_ptr<OpenCLEvent> launch(uint32_t offset, uint32_t length) {
+			size_t global_work_offset[] = { offset };
+			size_t global_work_size[] = { length };
+			cl_event kernel_event;
+			cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
+		}
 		// return kernel execution time miliseconds
 		double launch_and_wait(uint32_t offset, uint32_t length) {
 			REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");

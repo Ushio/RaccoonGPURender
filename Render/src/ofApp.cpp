@@ -47,6 +47,9 @@
 //	return pixels;
 //}
 
+
+
+
 namespace rt {
 	inline uint64_t splitmix64(uint64_t *x) {
 		uint64_t z = (*x += 0x9e3779b97f4a7c15);
@@ -65,12 +68,30 @@ namespace rt {
 		float sampleCount;
 	} Radiance_and_Samplecount;
 
+	//typedef struct {
+	//	uint32_t ix;
+	//	uint32_t iy;
+	//	uint64_t s0;
+	//	uint64_t s1;
+	//} PixelContext;
+
 	typedef struct {
 		uint32_t ix;
 		uint32_t iy;
 		uint64_t s0;
 		uint64_t s1;
+		alignas(16) glm::vec4 T;
+		alignas(16) glm::vec4 L;
+		uint32_t depth;
+		alignas(16) glm::vec4 ro;
+		alignas(16) glm::vec4 rd;
+
 	} PixelContext;
+
+	struct RenderEvent {
+		bool read_framebuffer = false;
+		std::shared_ptr<OpenCLEvent> eventobject;
+	};
 
 	class GPUScene {
 	public:
@@ -96,7 +117,8 @@ namespace rt {
 
 			try {
 				_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
-				std::string kernel_src = ofBufferFromFile("PathTracing.cl").getText();
+				// std::string kernel_src = ofBufferFromFile("PathTracing.cl").getText();
+				std::string kernel_src = ofBufferFromFile("PathTracingWavefront.cl").getText();
 				_kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), _context));
 				_kernel->selectKernel("PathTracing");
 
@@ -119,6 +141,12 @@ namespace rt {
 					uint64_t s = i;
 					_pixelContexts[i].s0 = splitmix64(&s);
 					_pixelContexts[i].s1 = splitmix64(&s);
+
+					_pixelContexts[i].depth = 0;
+					_pixelContexts[i].ro = glm::vec4(0.0f);
+					_pixelContexts[i].rd = glm::vec4(0.0f);
+					_pixelContexts[i].T = glm::vec4(1.0f);
+					_pixelContexts[i].L = glm::vec4(0.0f);
 				}
 				_pixelContextsCL = context->createBuffer(_pixelContexts.data(), _pixelContexts.size());
 
@@ -137,6 +165,22 @@ namespace rt {
 				_kernel->setGlobalArgument(4, *_primitive_indicesCL);
 				_kernel->setGlobalArgument(5, *_indicesCL);
 				_kernel->setGlobalArgument(6, *_pointsCL);
+
+				for (int i = 0; i < 4; ++i) {
+					RenderEvent re;
+					re.read_framebuffer = false;
+					re.eventobject = _kernel->launch(0, _frameBuffer.size());
+					_renderEvents.push(re);
+				}
+
+				//for (int i = 0; i < 10; ++i) {
+				//	auto e = kenelevents.front();
+				//	kenelevents.pop();
+				//	double elapsed = e->wait();
+
+				//	printf("pop [%d], %f ms\n", i, elapsed);
+				//	kenelevents.push(_kernel->launch(0, _frameBuffer.size()));
+				//}
 			}
 			catch (std::exception &e) {
 				printf("opencl error, %s\n", e.what());
@@ -191,17 +235,59 @@ namespace rt {
 
 		void step() {
 			try {
-				double execution_ms = _kernel->launch_and_wait(0, _frameBuffer.size());
-				printf("execution_ms %f\n", execution_ms);
+				//double execution_ms = _kernel->launch_and_wait(0, _frameBuffer.size());
+				//printf("execution_ms %f\n", execution_ms);
+
+				// 1つイベント待ち。Read はカウントしない
+
+				for (;;) {
+					auto e = _renderEvents.front();
+					_renderEvents.pop();
+
+					// printf("wait, is_read %s, ", (e.read_framebuffer ? "yes" : "no"));
+					// Stopwatch sw;
+					double elapsed = e.eventobject->wait();
+					// printf("gpu %.5f ms / wait %.5f ms\n", elapsed, sw.elapsed());
+
+					if (e.read_framebuffer) {
+						ofDisableArbTex();
+						ofPixels pixels = getImageFromFrameBuffer();
+						_image.setFromPixels(pixels);
+						ofEnableArbTex();
+					}
+					else {
+						break;
+					}
+				}
+				
+
+				// Read を定期実行
+				if (_count++ % 10 == 0) {
+					RenderEvent re;
+					re.read_framebuffer = true;
+
+					// Stopwatch sw;
+					re.eventobject = _frameBufferCL->read(_frameBuffer.data());
+					// printf("step %.5f ms\n", sw.elapsed());
+					_renderEvents.push(re);
+				}
+
+				// Step
+				RenderEvent re;
+				re.read_framebuffer = false;
+				re.eventobject = _kernel->launch(0, _frameBuffer.size());
+				_renderEvents.push(re);
 			}
 			catch (std::exception &e) {
 				printf("opencl error, %s\n", e.what());
 			}
 		}
 
-		ofPixels getImage() {
-			_frameBufferCL->read_immediately(_frameBuffer.data());
-
+		ofImage &getImage() {
+			return _image;
+		}
+private:
+		ofPixels getImageFromFrameBuffer() {
 			ofPixels pixels;
 			pixels.allocate(_camera->resolution_x, _camera->resolution_y, OF_IMAGE_COLOR);
 			uint8_t *p = pixels.getPixels();
@@ -247,6 +333,12 @@ namespace rt {
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _primitive_indicesCL;
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _indicesCL;
 		std::shared_ptr<OpenCLBuffer<glm::vec4>> _pointsCL;
+
+		std::queue<RenderEvent> _renderEvents;
+		int _count = 0;
+		 
+		ofImage _image;
+		// std::queue<std::shared_ptr<OpenCLEvent>> kenelevents;
 	};
 }
 
@@ -278,7 +370,7 @@ void ofApp::setup() {
 	_camera_model.load("../../../scenes/camera_model.ply");
 
 	_gpuScene = new rt::GPUScene(_alembicscene);
-	_gpuScene->step();
+	// _gpuScene->step();
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -302,15 +394,16 @@ inline bool isPowerOfTwo(uint32_t n) {
 //--------------------------------------------------------------
 void ofApp::draw() {
 	static bool show_scene_preview = false;
+	static bool step = true;
 
-	if (_gpuScene) {
+	if (_gpuScene && step) {
 		_gpuScene->step();
 
 		ofDisableArbTex();
 
-		if (ofGetFrameNum() % 5 == 0) {
-			_image.setFromPixels(_gpuScene->getImage());
-		}
+		//if (ofGetFrameNum() % 5 == 0) {
+		//	_image.setFromPixels(_gpuScene->getImage());
+		//}
 
 		//uint32_t n = _renderer->stepCount();
 		//if (32 <= n && isPowerOfTwo(n)) {
@@ -366,7 +459,10 @@ void ofApp::draw() {
 
 	ImGui::Begin("settings", nullptr);
 	ImGui::Checkbox("scene preview", &show_scene_preview);
-	ofxRaccoonImGui::image(_image);
+	ImGui::Checkbox("step", &step);
+	
+	// ofxRaccoonImGui::image(_image);
+	ofxRaccoonImGui::image(_gpuScene->getImage());
 
 	//ImGui::Separator();
 	//ImGui::Text("%d sample, fps = %.3f", _renderer->stepCount(), ofGetFrameRate());

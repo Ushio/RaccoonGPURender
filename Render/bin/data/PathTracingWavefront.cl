@@ -174,6 +174,11 @@ typedef struct {
 	uint iy;
 	ulong s0;
 	ulong s1;
+	float3 T;
+	float3 L;
+	uint depth;
+	float3 ro;
+	float3 rd;
 } PixelContext;
 
 typedef struct {
@@ -259,7 +264,7 @@ float3 lambertian_brdf(float3 wi, float3 wo, float3 Cd, float3 Ng) {
 	return Cd / (float)M_PI;
 }
 
-#define ITERATION 20
+#define ITERATION 80
 
 __kernel
 void PathTracing(
@@ -281,26 +286,16 @@ void PathTracing(
 	random.s0 = context[g_id].s0;
 	random.s1 = context[g_id].s1;
 
-	// random noise
-	// radiance_and_samplecount[g_id].xyz = (float3)(
-	// 	random_uniform(&random),
-	// 	random_uniform(&random),
-	// 	random_uniform(&random)
-	// );
-	// radiance_and_samplecount[g_id].w = 1.0f;
-
-	// simple gradient
-	// radiance_and_samplecount[g_id].xyz = (float3)((float)ix / (float)resolution.x, (float)iy / (float)resolution.y, 0.5f);
-	// radiance_and_samplecount[g_id].w = 1.0f;
+	int depth = context[g_id].depth;
+	float3 T = context[g_id].T;
+	float3 L = context[g_id].L;
+	float3 ro = context[g_id].ro;
+	float3 rd = context[g_id].rd;
 
 	float fovy = 0.602416;
 	float3 eye = (float3)(0.0f, 0.0f, 10.0f);
 	float3 center = (float3)(0.0f, 0.0f, 2.0f);
 	float3 up = (float3)(0.0f, 1.0f, 0.0f);
-
-	// float3 eye = (float3)(-2.796801f, 3.173686f, -10.951590f);
-	// float3 center = (float3)(-2.531703f, 3.057475f, -9.994396f);
-	// float3 up = (float3)(0.031017f, 0.993225f, 0.111995f);
 
 	float3 viewDir = normalize(center - eye);
 	float3 rightDir = normalize(cross(viewDir, up));
@@ -310,142 +305,87 @@ void PathTracing(
 	float imageplane_w = imageplane_h / resolution.y * resolution.x;
 	float3 imageplane_o = (eye + viewDir) + upDir * imageplane_h * 0.5f - rightDir * imageplane_w * 0.5f;
 
-	int numSamples = 0;
-	float3 radiance = (float3)(0.0f);
-
 	for(int i = 0 ; i < ITERATION; ++i) {
-		float3 sample_on_imageplane = imageplane_o 
-			+ rightDir * imageplane_w * ((ix + random_uniform(&random)) / (float)resolution.x) 
-			- upDir    * imageplane_h * ((iy + random_uniform(&random)) / (float)resolution.y);
+		if(depth == 0) {
+			float3 sample_on_imageplane = imageplane_o 
+				+ rightDir * imageplane_w * ((ix + random_uniform(&random)) / (float)resolution.x) 
+				- upDir    * imageplane_h * ((iy + random_uniform(&random)) / (float)resolution.y);
 
-		float3 ro = eye;
-		float3 rd = normalize(sample_on_imageplane - eye);
-
-		float3 L = (float3)(0.0f);
-		float3 T = (float3)(1.0f);
-
-		for(int j = 0 ; j < 10 ; ++j) {
-			RayHit hit;
-			if(intersect_tbvh(tbvh, primitive_indices, indices, points, ro, rd, &hit)) {
-				float3 wo = -rd;
-
-				int v_index = hit.primitive_index * 3;
-				float3 v0 = points[indices[v_index]].xyz;
-				float3 v1 = points[indices[v_index + 1]].xyz;
-				float3 v2 = points[indices[v_index + 2]].xyz;
-				float3 Ng = normalize(cross(v1 - v0, v2 - v1));
-
-				if(dot(wo, Ng) < 0.0) {
-					Ng = -Ng;
-				}
-
-				// normal
-				// L += Ng * 0.5f + (float3)(0.5f);
-				// break;
-				
-				float3 xAxis;
-				float3 yAxis;
-				get_orthonormal_basis(Ng, &xAxis, &yAxis);
-
-				// float2 uv0 = point_uvs[v_index].xy;
-				// float2 uv1 = point_uvs[v_index + 1].xy;
-				// float2 uv2 = point_uvs[v_index + 2].xy;
-
-				// float w = (1.0f - hit.uv.x - hit.uv.y);
-				// float2 uv = uv0 * hit.uv.x + uv1 * hit.uv.y + uv2 * w;
-
-				Material m;
-				// Constant 
-				// m.Cd = (float3)(0.75, 0.75, 0.75);
-
-				// R, G, B TEST
-				// float w = (1.0f - hit.uv.x - hit.uv.y);
-				// m.Cd = (float3)(1.0f, 0.1f, 0.1f) * hit.uv.x + (float3)(0.1f, 1.0f, 0.1f) * hit.uv.y + (float3)(0.1f, 0.1f, 1.0f) * w;
-
-				// UV TEST
-				// m.Cd = (float3)(uv.x, uv.y, 0.0);
-
-				// Sampling
-				// const sampler_t samp = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
-				// float4 rgba = read_imagef(texture, samp, (float2)(uv.x, 1.0f - uv.y));
-
-				// if(rgba.w < random_uniform(&random)) {
-				// 	ro = ro + rd * (hit.tmin + 1.0e-5f);
-				// 	continue;
-				// }
-
-				m.Cd = (float3)(0.75, 0.75, 0.75);
-				m.Le = (float3)(0.0, 0.0, 0.0);
-
-				// NEE
-				// {
-				// 	float pdf_env;
-				// 	float3 env_rd = sample_envmap(env_sample_cells, env_sample_cell_length, &random, &pdf_env);
-				// 	float3 env_ro = ro + rd * hit.tmin + Ng * 1.0e-5f;
-				// 	float3 wi = env_rd;
-				// 	float cosTheta = fabs(dot(Ng, wi));
-				// 	float3 brdf = lambertian_brdf(wi, wo, m.Cd, Ng);
-
-				// 	// evaluate_env_pdf
-				// 	// pdf_env = evaluate_env_pdf(wi, envmap_pdf);
-				// 	RayHit envhit;
-				// 	if(intersect_gpu_tbvh(tbvh, primitive_indices, indices, points, env_ro, env_rd, &envhit) == false) {
-				// 		L += T * brdf * evaluate_env(env_rd, envmap) * cosTheta / pdf_env;
-				// 	}
-				// }
-
-				// Mixture Density
-				// float3 wi;
-				// if(random_uniform(&random) < 0.5f) {
-				// 	float3 local_wi = cosine_weighted_hemisphere_z_up(random_uniform(&random), random_uniform(&random));
-				// 	wi = xAxis * local_wi.x + Ng * local_wi.z + yAxis * local_wi.y;
-				// } else {
-				// 	float pdf_env;
-				// 	wi = sample_envmap(env_sample_cells, env_sample_cell_length, &random, &pdf_env);
-				// }
-				// float pdf = pdf_cosine_weighted_hemisphere(Ng, wi) * 0.5f + evaluate_env_pdf(wi, env_sample_cells) * 0.5f;
-
-				// Direct Only
-				// float env_pdf;
-				// wi = sample_envmap(env_sample_cells, env_sample_cell_length, &random, &env_pdf);
-				// float pdf = evaluate_env_pdf(wi, env_sample_cells);
-				
-				// naive
-				float3 local_wi = cosine_weighted_hemisphere_z_up(random_uniform(&random), random_uniform(&random));
-				float3 wi = xAxis * local_wi.x + Ng * local_wi.z + yAxis * local_wi.y;
-				float pdf = pdf_cosine_weighted_hemisphere(Ng, wi);
-
-				float cosTheta = fabs(dot(wi, Ng));
-				// float3 brdf = m.Cd / (float)M_PI;
-				float3 brdf = lambertian_brdf(wi, wo, m.Cd, Ng);
-
-				L += T * m.Le;
-				T *= brdf * cosTheta / pdf;
-
-				// russian roulette
-				float min_compornent = max(max(T.x, T.y), T.z);
-				float continue_p = i < 6 ? 1.0f : min(min_compornent, 1.0f);
-				if(continue_p < random_uniform(&random)) {
-					break;
-				}
-				T /= continue_p;
-
-				ro = ro + rd * hit.tmin + Ng * 1.0e-5f;
-				rd = wi;
-			} else {
-				L += T * (float3)(0.8f);
-				// if(j == 0){
-				// 	L += T * evaluate_env(rd, envmap);
-				// }
-				// L += T * evaluate_env(rd, envmap);
-				break;
-			}
+			ro = eye;
+			rd = normalize(sample_on_imageplane - eye);
 		}
-		if(isfinite(L.x) && isfinite(L.y) && isfinite(L.z)) {
-			radiance += L;
-			numSamples++;
+
+		bool done = false;
+
+		RayHit hit;
+		if(intersect_tbvh(tbvh, primitive_indices, indices, points, ro, rd, &hit)) {
+			float3 wo = -rd;
+
+			int v_index = hit.primitive_index * 3;
+			float3 v0 = points[indices[v_index]].xyz;
+			float3 v1 = points[indices[v_index + 1]].xyz;
+			float3 v2 = points[indices[v_index + 2]].xyz;
+			float3 Ng = normalize(cross(v1 - v0, v2 - v1));
+
+			if(dot(wo, Ng) < 0.0) {
+				Ng = -Ng;
+			}
+
+			// normal
+			// L += Ng * 0.5f + (float3)(0.5f);
+			// break;
+			
+			float3 xAxis;
+			float3 yAxis;
+			get_orthonormal_basis(Ng, &xAxis, &yAxis);
+
+			Material m;
+			m.Cd = (float3)(0.75, 0.75, 0.75);
+			m.Le = (float3)(0.0, 0.0, 0.0);
+			
+			// naive
+			float3 local_wi = cosine_weighted_hemisphere_z_up(random_uniform(&random), random_uniform(&random));
+			float3 wi = xAxis * local_wi.x + Ng * local_wi.z + yAxis * local_wi.y;
+			float pdf = pdf_cosine_weighted_hemisphere(Ng, wi);
+
+			float cosTheta = fabs(dot(wi, Ng));
+			// float3 brdf = m.Cd / (float)M_PI;
+			float3 brdf = lambertian_brdf(wi, wo, m.Cd, Ng);
+
+			L += T * m.Le;
+			T *= brdf * cosTheta / pdf;
+
+			// russian roulette
+			float min_compornent = max(max(T.x, T.y), T.z);
+			float continue_p = i < 6 ? 1.0f : min(min_compornent, 1.0f);
+			if(continue_p < random_uniform(&random)) {
+				done = true;
+			}
+			T /= continue_p;
+
+			ro = ro + rd * hit.tmin + Ng * 1.0e-5f;
+			rd = wi;
 		} else {
-			// we should output error to a another buffer...
+			L += T * (float3)(0.8f);
+			done = true;
+		}
+
+		depth++;
+		if(depth < 10) {
+			// continue;
+		} else {
+			done = true;
+		}
+
+		if(done) {
+			depth = 0;
+			if(isfinite(L.x) && isfinite(L.y) && isfinite(L.z)) {
+				radiance_and_samplecount[g_id].xyz += L;
+			}
+			radiance_and_samplecount[g_id].w += 1.0f;
+			depth = 0;
+			T = (float3)(1.0f);
+			L = (float3)(0.0f);
 		}
 	}
 	
@@ -455,6 +395,12 @@ void PathTracing(
 	context[g_id].s0 = random.s0;
 	context[g_id].s1 = random.s1;
 
-	radiance_and_samplecount[g_id].xyz += radiance;
-	radiance_and_samplecount[g_id].w += numSamples;
+	context[g_id].depth = depth;
+	context[g_id].T = T;
+	context[g_id].L = L;
+	context[g_id].ro = ro;
+	context[g_id].rd = rd;
+
+	// radiance_and_samplecount[g_id].xyz += radiance;
+	// radiance_and_samplecount[g_id].w += numSamples;
 }

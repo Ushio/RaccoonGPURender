@@ -88,11 +88,6 @@ namespace rt {
 
 	} PixelContext;
 
-	struct RenderEvent {
-		bool read_framebuffer = false;
-		std::shared_ptr<OpenCLEvent> eventobject;
-	};
-
 	class GPUScene {
 	public:
 		GPUScene(std::shared_ptr<houdini_alembic::AlembicScene> scene) :_scene(scene) {
@@ -167,20 +162,8 @@ namespace rt {
 				_kernel->setGlobalArgument(6, *_pointsCL);
 
 				for (int i = 0; i < 4; ++i) {
-					RenderEvent re;
-					re.read_framebuffer = false;
-					re.eventobject = _kernel->launch(0, _frameBuffer.size());
-					_renderEvents.push(re);
+					_renderEvents.push(_kernel->launch(0, _frameBuffer.size()));
 				}
-
-				//for (int i = 0; i < 10; ++i) {
-				//	auto e = kenelevents.front();
-				//	kenelevents.pop();
-				//	double elapsed = e->wait();
-
-				//	printf("pop [%d], %f ms\n", i, elapsed);
-				//	kenelevents.push(_kernel->launch(0, _frameBuffer.size()));
-				//}
 			}
 			catch (std::exception &e) {
 				printf("opencl error, %s\n", e.what());
@@ -235,48 +218,36 @@ namespace rt {
 
 		void step() {
 			try {
-				//double execution_ms = _kernel->launch_and_wait(0, _frameBuffer.size());
-				//printf("execution_ms %f\n", execution_ms);
+				auto e = _renderEvents.front();
+				_renderEvents.pop();
 
-				// 1つイベント待ち。Read はカウントしない
-
-				for (;;) {
-					auto e = _renderEvents.front();
-					_renderEvents.pop();
-
-					// printf("wait, is_read %s, ", (e.read_framebuffer ? "yes" : "no"));
-					// Stopwatch sw;
-					double elapsed = e.eventobject->wait();
-					// printf("gpu %.5f ms / wait %.5f ms\n", elapsed, sw.elapsed());
-
-					if (e.read_framebuffer) {
-						ofDisableArbTex();
-						ofPixels pixels = getImageFromFrameBuffer();
-						_image.setFromPixels(pixels);
-						ofEnableArbTex();
-					}
-					else {
-						break;
-					}
-				}
+				Stopwatch sw;
+				double elapsed = e->wait();
+				printf("gpu %.5f ms / wait %.5f ms\n", elapsed, sw.elapsed());
 				
+				if (_mapEvent && _mapEvent->status() == CL_COMPLETE) {
+					Stopwatch sw;
+					std::copy(_mapPtr, _mapPtr + _frameBuffer.size(), _frameBuffer.begin());
+					_frameBufferCL->unmap(_mapPtr);
+					_mapPtr = nullptr;
+					_mapEvent = std::shared_ptr<OpenCLEvent>();
+
+					ofDisableArbTex();
+					ofPixels pixels = getImageFromFrameBuffer();
+					_image.setFromPixels(pixels);
+					ofEnableArbTex();
+					// printf("_frameBufferCL->map CL_COMPLETE %.5f ms\n", sw.elapsed());
+				}
 
 				// Read を定期実行
-				if (_count++ % 10 == 0) {
-					RenderEvent re;
-					re.read_framebuffer = true;
-
+				if (_count++ % 5 == 0) {
 					// Stopwatch sw;
-					re.eventobject = _frameBufferCL->read(_frameBuffer.data());
-					// printf("step %.5f ms\n", sw.elapsed());
-					_renderEvents.push(re);
+					_mapEvent = _frameBufferCL->map(&_mapPtr);
+					// printf("_frameBufferCL->map %.5f ms\n", sw.elapsed());
 				}
 
 				// Step
-				RenderEvent re;
-				re.read_framebuffer = false;
-				re.eventobject = _kernel->launch(0, _frameBuffer.size());
-				_renderEvents.push(re);
+				_renderEvents.push(_kernel->launch(0, _frameBuffer.size()));
 			}
 			catch (std::exception &e) {
 				printf("opencl error, %s\n", e.what());
@@ -334,11 +305,13 @@ private:
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _indicesCL;
 		std::shared_ptr<OpenCLBuffer<glm::vec4>> _pointsCL;
 
-		std::queue<RenderEvent> _renderEvents;
+		std::queue<std::shared_ptr<OpenCLEvent>> _renderEvents;
+		std::shared_ptr<OpenCLEvent> _mapEvent;
+		Radiance_and_Samplecount *_mapPtr = nullptr;
+
 		int _count = 0;
 		 
 		ofImage _image;
-		// std::queue<std::shared_ptr<OpenCLEvent>> kenelevents;
 	};
 }
 
@@ -370,7 +343,6 @@ void ofApp::setup() {
 	_camera_model.load("../../../scenes/camera_model.ply");
 
 	_gpuScene = new rt::GPUScene(_alembicscene);
-	// _gpuScene->step();
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();

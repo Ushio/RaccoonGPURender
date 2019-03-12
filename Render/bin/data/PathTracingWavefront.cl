@@ -231,7 +231,6 @@ bool intersect_tbvh(__global TBVHNode* tbvh, __global uint* primitive_indices, _
 	while (0 <= node) {
 		AABB bounds = tbvh[node].bounds;
 		if (slabs(bounds.lower.xyz, bounds.upper.xyz, ro, one_over_rd, tmin)) {
-			// primitive_indices_beg == primitive_indices_end == -1 if is leaf 
 			int beg = tbvh[node].primitive_indices_beg;
 			int end = tbvh[node].primitive_indices_end;
 			for (int i = beg; i < end; ++i) {

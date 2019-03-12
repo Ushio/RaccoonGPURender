@@ -77,6 +77,12 @@ namespace rt {
 			double delta_ms = delta_time_nano * 0.001 * 0.001;
 			return delta_ms;
 		}
+		cl_int status() {
+			cl_int s;
+			cl_int r = clGetEventInfo(_event.get(), CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(s), &s, nullptr);
+			REQUIRE_OR_EXCEPTION(r == CL_SUCCESS, "clGetEventInfo() failed");
+			return s;
+		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
 	};
@@ -100,19 +106,16 @@ namespace rt {
 			return _memory.get();
 		}
 
-		//void read_immediately(T *value) {
-		//	cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_TRUE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
-		//}
-
-		std::shared_ptr<OpenCLEvent> read(T *value) {
+		std::shared_ptr<OpenCLEvent> map(T **value) {
 			cl_event read_event;
-			Stopwatch sw;
-			cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, &read_event);
-			printf("step %.5f ms\n", sw.elapsed());
-
+			cl_int status;
+			(*value) = (T *)clEnqueueMapBuffer(_queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &read_event, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(read_event));
+		}
+		void unmap(T *value) {
+			cl_int status = clEnqueueUnmapMemObject(_queue, _memory.get(), value, 0, nullptr, nullptr);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
 		}
 	private:
 		cl_context _context;
@@ -287,35 +290,35 @@ namespace rt {
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
 		}
 		// return kernel execution time miliseconds
-		double launch_and_wait(uint32_t offset, uint32_t length) {
-			REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
+		//double launch_and_wait(uint32_t offset, uint32_t length) {
+		//	REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
 
-			cl_event kernel_event = 0;
-			size_t global_work_offset[] = { offset };
-			size_t global_work_size[] = { length };
-			cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
+		//	cl_event kernel_event = 0;
+		//	size_t global_work_offset[] = { offset };
+		//	size_t global_work_size[] = { length };
+		//	cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
 
-			// Time Profile
-			status = clWaitForEvents(1, &kernel_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
+		//	// Time Profile
+		//	status = clWaitForEvents(1, &kernel_event);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
 
-			cl_ulong ev_beg_time_nano = 0;
-			cl_ulong ev_end_time_nano = 0;
+		//	cl_ulong ev_beg_time_nano = 0;
+		//	cl_ulong ev_end_time_nano = 0;
 
-			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &ev_beg_time_nano, NULL);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+		//	status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &ev_beg_time_nano, NULL);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
 
-			status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+		//	status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
 
-			status = clReleaseEvent(kernel_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clReleaseEvent() failed");
+		//	status = clReleaseEvent(kernel_event);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clReleaseEvent() failed");
 
-			cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
-			double delta_ms = delta_time_nano * 0.001 * 0.001;
-			return delta_ms;
-		}
+		//	cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
+		//	double delta_ms = delta_time_nano * 0.001 * 0.001;
+		//	return delta_ms;
+		//}
 		std::shared_ptr<OpenCLContext> context() {
 			return _context;
 		}

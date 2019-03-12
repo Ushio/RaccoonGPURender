@@ -27,7 +27,6 @@ public:
 	void gotMessage(ofMessage msg);
 
 	ofEasyCam _camera;
-	ofImage _image;
 	ofMesh _camera_model;
 
 	std::shared_ptr<houdini_alembic::AlembicScene> _alembicscene;

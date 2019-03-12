@@ -182,6 +182,13 @@ typedef struct {
 } PixelContext;
 
 typedef struct {
+	float3 eye;             // eye point
+	float3 object_plane_o;  // objectplane origin
+	float3 object_plane_rv; // R * objectplane_width
+	float3 object_plane_bv; // B * objectplane_height
+} Camera;
+
+typedef struct {
 	float3 lower;
 	float3 upper;
 } AABB;
@@ -263,7 +270,7 @@ float3 lambertian_brdf(float3 wi, float3 wo, float3 Cd, float3 Ng) {
 	return Cd / (float)M_PI;
 }
 
-#define ITERATION 80
+#define ITERATION 4
 
 __kernel
 void PathTracing(
@@ -273,7 +280,8 @@ void PathTracing(
 	__global TBVHNode* tbvh, 
 	__global uint* primitive_indices, 
 	__global uint* indices, 
-	__global float4* points
+	__global float4* points,
+	__global Camera *camera
 )
 {
 	const int g_id = get_global_id(0);
@@ -291,27 +299,18 @@ void PathTracing(
 	float3 ro = context[g_id].ro;
 	float3 rd = context[g_id].rd;
 
-	float fovy = 0.602416;
-	float3 eye = (float3)(0.0f, 0.0f, 10.0f);
-	float3 center = (float3)(0.0f, 0.0f, 2.0f);
-	float3 up = (float3)(0.0f, 1.0f, 0.0f);
-
-	float3 viewDir = normalize(center - eye);
-	float3 rightDir = normalize(cross(viewDir, up));
-	float3 upDir = normalize(cross(rightDir, viewDir));
-
-	float imageplane_h = 2.0f * tan(fovy / 2.0f);
-	float imageplane_w = imageplane_h / resolution.y * resolution.x;
-	float3 imageplane_o = (eye + viewDir) + upDir * imageplane_h * 0.5f - rightDir * imageplane_w * 0.5f;
-
 	for(int i = 0 ; i < ITERATION; ++i) {
 		if(depth == 0) {
-			float3 sample_on_imageplane = imageplane_o 
-				+ rightDir * imageplane_w * ((ix + random_uniform(&random)) / (float)resolution.x) 
-				- upDir    * imageplane_h * ((iy + random_uniform(&random)) / (float)resolution.y);
-
-			ro = eye;
-			rd = normalize(sample_on_imageplane - eye);
+			float u = random_uniform(&random);
+			float v = random_uniform(&random);
+			float step_x = 1.0f / resolution.x;
+			float step_y = 1.0f / resolution.y;
+			float3 p_objectPlane =
+				camera[0].object_plane_o
+				+ camera[0].object_plane_rv * (step_x * (ix + u))
+				+ camera[0].object_plane_bv * (step_y * (iy + v));
+			ro = camera[0].eye;
+			rd = normalize(p_objectPlane - camera[0].eye);
 		}
 
 		bool done = false;

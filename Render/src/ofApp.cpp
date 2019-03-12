@@ -68,6 +68,11 @@ namespace rt {
 		float sampleCount;
 	} Radiance_and_Samplecount;
 
+	typedef struct alignas(16) {
+		glm::vec3 vec3;
+		char align[4];
+	} float3;
+
 	//typedef struct {
 	//	uint32_t ix;
 	//	uint32_t iy;
@@ -87,6 +92,13 @@ namespace rt {
 		alignas(16) glm::vec4 rd;
 
 	} PixelContext;
+
+	typedef struct {
+		float3 eye;             // eye point
+		float3 object_plane_o;  // objectplane origin
+		float3 object_plane_rv; // R * objectplane_width
+		float3 object_plane_bv; // B * objectplane_height
+	} Camera;
 
 	class GPUScene {
 	public:
@@ -145,6 +157,20 @@ namespace rt {
 				}
 				_pixelContextsCL = context->createBuffer(_pixelContexts.data(), _pixelContexts.size());
 
+				Camera camera;
+				auto to = [](houdini_alembic::Vector3f p) {
+					return glm::dvec3(p.x, p.y, p.z);
+				};
+				camera.eye.vec3 = to(_camera->eye);
+				camera.object_plane_o.vec3 =
+					to(_camera->eye) + to(_camera->forward) * (double)_camera->focusDistance
+					+ to(_camera->left) * (double)_camera->objectPlaneWidth * 0.5
+					+ to(_camera->up) * (double)_camera->objectPlaneHeight * 0.5;
+				camera.object_plane_rv.vec3 = to(_camera->right) * (double)_camera->objectPlaneWidth;
+				camera.object_plane_bv.vec3 = to(_camera->down) * (double)_camera->objectPlaneHeight;
+
+				_cameraCL = context->createBuffer(&camera, 1);
+
 				_frameBuffer.resize(_camera->resolution_x * _camera->resolution_y);
 				for (int i = 0; i < _pixelContexts.size(); ++i) {
 					_frameBuffer[i].radiance = glm::vec3(0.0f);
@@ -160,6 +186,7 @@ namespace rt {
 				_kernel->setGlobalArgument(4, *_primitive_indicesCL);
 				_kernel->setGlobalArgument(5, *_indicesCL);
 				_kernel->setGlobalArgument(6, *_pointsCL);
+				_kernel->setGlobalArgument(7, *_cameraCL);
 
 				for (int i = 0; i < 4; ++i) {
 					_renderEvents.push(_kernel->launch(0, _frameBuffer.size()));
@@ -224,7 +251,7 @@ namespace rt {
 				Stopwatch sw;
 				double elapsed = e->wait();
 				printf("gpu %.5f ms / wait %.5f ms\n", elapsed, sw.elapsed());
-				
+
 				if (_mapEvent && _mapEvent->status() == CL_COMPLETE) {
 					Stopwatch sw;
 					std::copy(_mapPtr, _mapPtr + _frameBuffer.size(), _frameBuffer.begin());
@@ -240,7 +267,7 @@ namespace rt {
 				}
 
 				// Read を定期実行
-				if (_count++ % 5 == 0) {
+				if (_count++ % 10 == 0) {
 					// Stopwatch sw;
 					_mapEvent = _frameBufferCL->map(&_mapPtr);
 					// printf("_frameBufferCL->map %.5f ms\n", sw.elapsed());
@@ -266,14 +293,17 @@ private:
 			auto linearMap = [](float x) {
 				return (uint8_t)glm::clamp(x * 256.0f, 0.0f, 255.0f);
 			};
+			auto gammaMap = [](float x) {
+				return (uint8_t)glm::clamp(pow(x, 1.0f / 2.2f) * 256.0f, 0.0f, 255.0f);
+			};
 			for (int y = 0; y < _camera->resolution_y; ++y) {
 				for (int x = 0; x < _camera->resolution_x; ++x) {
 					int index = y * _camera->resolution_x + x;
 					auto buffer = _frameBuffer[index];
 					auto color = buffer.radiance / buffer.sampleCount;
-					p[index * 3]     = linearMap(color.x);
-					p[index * 3 + 1] = linearMap(color.y);
-					p[index * 3 + 2] = linearMap(color.z);
+					p[index * 3]     = gammaMap(color.x);
+					p[index * 3 + 1] = gammaMap(color.y);
+					p[index * 3 + 2] = gammaMap(color.z);
 				}
 			}
 			return pixels;
@@ -305,6 +335,8 @@ private:
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _indicesCL;
 		std::shared_ptr<OpenCLBuffer<glm::vec4>> _pointsCL;
 
+		std::shared_ptr<OpenCLBuffer<Camera>> _cameraCL;
+
 		std::queue<std::shared_ptr<OpenCLEvent>> _renderEvents;
 		std::shared_ptr<OpenCLEvent> _mapEvent;
 		Radiance_and_Samplecount *_mapPtr = nullptr;
@@ -316,9 +348,6 @@ private:
 }
 
 rt::GPUScene *_gpuScene = nullptr;
-int _width;
-int _height;
-
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -328,6 +357,11 @@ void ofApp::setup() {
 	_camera.setFarClip(100.0f);
 	_camera.setDistance(5.0f);
 
+	_camera_model.load("../../../scenes/camera_model.ply");
+
+	loadScene();
+}
+void ofApp::loadScene() {
 	houdini_alembic::AlembicStorage storage;
 	std::string error_message;
 	storage.open(ofToDataPath("../../../scenes/CornelBox.abc"), error_message);
@@ -340,8 +374,7 @@ void ofApp::setup() {
 		printf("sample error_message: %s\n", error_message.c_str());
 	}
 
-	_camera_model.load("../../../scenes/camera_model.ply");
-
+	delete _gpuScene;
 	_gpuScene = new rt::GPUScene(_alembicscene);
 }
 void ofApp::exit() {
@@ -425,13 +458,16 @@ void ofApp::draw() {
 	}
 
 	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Appearing);
-	ImGui::SetNextWindowSize(ImVec2(600, 600), ImGuiCond_Appearing);
+	ImGui::SetNextWindowSize(ImVec2(1100, 800), ImGuiCond_Appearing);
 	ImGui::SetNextWindowCollapsed(false, ImGuiCond_Appearing);
 	ImGui::SetNextWindowBgAlpha(0.5f);
 
 	ImGui::Begin("settings", nullptr);
 	ImGui::Checkbox("scene preview", &show_scene_preview);
 	ImGui::Checkbox("step", &step);
+	if (ImGui::Button("save")) {
+		_gpuScene->getImage().save("render.png");
+	}
 	
 	// ofxRaccoonImGui::image(_image);
 	ofxRaccoonImGui::image(_gpuScene->getImage());
@@ -450,7 +486,9 @@ void ofApp::draw() {
 
 //--------------------------------------------------------------
 void ofApp::keyPressed(int key) {
-
+	if (key == 'r') {
+		loadScene();
+	}
 }
 
 //--------------------------------------------------------------

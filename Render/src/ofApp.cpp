@@ -11,6 +11,7 @@
 #include "stb/stb_image_write.h"
 
 #include "online.hpp"
+#include "stopwatch.hpp"
 
 //inline ofPixels toOf(const rt::Image &image) {
 //	ofPixels pixels;
@@ -92,7 +93,6 @@ namespace rt {
 		uint32_t depth;
 		alignas(16) glm::vec4 ro;
 		alignas(16) glm::vec4 rd;
-
 	} PixelContext;
 
 	typedef struct {
@@ -127,11 +127,12 @@ namespace rt {
 			try {
 				_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
 				// _context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_INTEL));
-				// std::string kernel_src = ofBufferFromFile("PathTracing.cl").getText();
 				std::string kernel_src = ofBufferFromFile("PathTracingWavefront.cl").getText();
-				_kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), OpenCLBuildOptions(), _context));
+				OpenCLBuildOptions options;
+				options.include(ofToDataPath("../../../kernels", true));
+				_kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), options, _context));
 				_kernel->selectKernel("PathTracing");
-
+				
 				auto context = _context;
 
 				// 
@@ -159,6 +160,9 @@ namespace rt {
 					_pixelContexts[i].L = glm::vec4(0.0f);
 				}
 				_pixelContextsCL = context->createBuffer(_pixelContexts.data(), _pixelContexts.size());
+
+				_rays.resize(_camera->resolution_x * _camera->resolution_y);
+				_raysCL = context->createBuffer(_rays.data(), _rays.size());
 
 				Camera camera;
 				auto to = [](houdini_alembic::Vector3f p) {
@@ -190,10 +194,13 @@ namespace rt {
 				_kernel->setGlobalArgument(5, *_indicesCL);
 				_kernel->setGlobalArgument(6, *_pointsCL);
 				_kernel->setGlobalArgument(7, *_cameraCL);
+				_kernel->setGlobalArgument(8, *_raysCL);
 
 				for (int i = 0; i < 4; ++i) {
 					_renderEvents.push(_kernel->launch(0, _frameBuffer.size()));
 				}
+
+				_cpuTime = Stopwatch();
 			}
 			catch (std::exception &e) {
 				printf("opencl error, %s\n", e.what());
@@ -257,9 +264,11 @@ namespace rt {
 				mean.addSample(elapsed);
 				printf("gpu %.5f ms (avg %.5f) / wait %.5f ms\n", elapsed, mean.mean(), sw.elapsed());
 
+				_gpuTime += elapsed;
+
 				if (_mapEvent && _mapEvent->status() == CL_COMPLETE) {
 					// TODO Mapした所からそのままReadしたほうが直接的
-					Stopwatch sw;
+					// Stopwatch sw;
 					std::copy(_mapPtr, _mapPtr + _frameBuffer.size(), _frameBuffer.begin());
 					_frameBufferCL->unmap(_mapPtr);
 					_mapPtr = nullptr;
@@ -272,11 +281,16 @@ namespace rt {
 					// printf("_frameBufferCL->map CL_COMPLETE %.5f ms\n", sw.elapsed());
 				}
 
+				if (_raysMapEvent && _raysMapEvent->status() == CL_COMPLETE) {
+					// _raysMapPtr
+					uint32_t rays = std::accumulate(_raysMapPtr, _raysMapPtr + _rays.size(), 0, std::plus<uint32_t>());
+					_raysPerSecond = (uint32_t)((double)rays / _cpuTime.elapsed());
+				}
+
 				// Read を定期実行
 				if (_count++ % 10 == 0) {
-					// Stopwatch sw;
 					_mapEvent = _frameBufferCL->map(&_mapPtr);
-					// printf("_frameBufferCL->map %.5f ms\n", sw.elapsed());
+					_raysMapEvent = _raysCL->map(&_raysMapPtr);
 				}
 
 				// Step
@@ -289,6 +303,10 @@ namespace rt {
 
 		ofImage &getImage() {
 			return _image;
+		}
+
+		uint32_t getRaysPerSecond() const {
+			return _raysPerSecond;
 		}
 private:
 		ofPixels getImageFromFrameBuffer() {
@@ -328,6 +346,7 @@ private:
 
 		std::vector<Radiance_and_Samplecount> _frameBuffer;
 		std::vector<PixelContext> _pixelContexts;
+		std::vector<uint32_t> _rays;
 
 		// GPU Memory
 		std::shared_ptr<OpenCLContext> _context;
@@ -335,6 +354,7 @@ private:
 
 		std::shared_ptr<OpenCLBuffer<Radiance_and_Samplecount>> _frameBufferCL;
 		std::shared_ptr<OpenCLBuffer<PixelContext>> _pixelContextsCL;
+		std::shared_ptr<OpenCLBuffer<uint32_t>> _raysCL;
 
 		std::shared_ptr<OpenCLBuffer<TBVHNode>> _tvbhCL;
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _primitive_indicesCL;
@@ -347,9 +367,18 @@ private:
 		std::shared_ptr<OpenCLEvent> _mapEvent;
 		Radiance_and_Samplecount *_mapPtr = nullptr;
 
+		std::shared_ptr<OpenCLEvent> _raysMapEvent;
+		uint32_t *_raysMapPtr = nullptr;
+
+		uint32_t _raysPerSecond = 0;
+
 		int _count = 0;
 		 
 		ofImage _image;
+
+		// Profile
+		Stopwatch _cpuTime;
+		double _gpuTime = 0.0;
 	};
 }
 
@@ -474,6 +503,8 @@ void ofApp::draw() {
 	if (ImGui::Button("save")) {
 		_gpuScene->getImage().save("render.png");
 	}
+
+	ImGui::Text("%.3f MRays/s", (double)_gpuScene->getRaysPerSecond() * 0.001 * 0.001);
 	
 	// ofxRaccoonImGui::image(_image);
 	ofxRaccoonImGui::image(_gpuScene->getImage());

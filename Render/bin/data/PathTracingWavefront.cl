@@ -1,3 +1,4 @@
+#include "slab.cl"
 
 /* 
  tmin must be initialized.
@@ -202,25 +203,6 @@ typedef struct {
 	int primitive_indices_end;
 } TBVHNode;
 
-float compMin(float3 v){
-	return min(min(v.x, v.y), v.z);
-}
-float compMax(float3 v){
-	return max(max(v.x, v.y), v.z);
-}
-bool slabs(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float near_t) {
-	float3 t0 = (p0 - ro) * one_over_rd;
-	float3 t1 = (p1 - ro) * one_over_rd;
-
-	t0 = select(t0, -t1, isnan(t0));
-	t1 = select(t1, -t0, isnan(t1));
-
-	float3 tmin = min(t0, t1), tmax = max(t0, t1);
-	float region_min = compMax(tmin);
-	float region_max = compMin(tmax);
-	return region_min <= region_max && 0.0f <= region_max && region_min <= near_t;
-}
-
 struct RayHit_t
 {
 	float tmin;
@@ -286,7 +268,8 @@ void PathTracing(
 	__global uint* primitive_indices, 
 	__global uint* indices, 
 	__global float4* points,
-	__global Camera *camera
+	__global Camera *camera,
+	__global uint *rays
 )
 {
 	const int g_id = get_global_id(0);
@@ -319,6 +302,8 @@ void PathTracing(
 		}
 
 		bool done = false;
+
+		rays[g_id]++;
 
 		RayHit hit;
 		if(intersect_tbvh(tbvh, primitive_indices, indices, points, ro, rd, &hit)) {

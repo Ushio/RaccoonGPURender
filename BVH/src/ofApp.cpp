@@ -138,7 +138,7 @@ namespace rt {
 		void buildBVH() {
 			_embreeBVH = buildEmbreeBVH(_indices, _points);
 			buildThreadedBVH(_tbvh, _primitive_indices, _embreeBVH->bvh_root);
-
+			
 			// 無限ループの検知
 			for (int i = 0; i < _tbvh.size(); ++i) {
 				if (0 <= _tbvh[i].hit_link) {
@@ -151,6 +151,9 @@ namespace rt {
 					RT_ASSERT(i < _tbvh[i].miss_link);
 				}
 			}
+
+			buildMultiThreadedBVH(_mtbvh, _primitive_indices, _embreeBVH->bvh_root);
+			// もはやリンクがかならず後続のインデックスを持つとは限らない。
 		}
 
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
@@ -162,6 +165,7 @@ namespace rt {
 		std::shared_ptr<EmbreeBVH> _embreeBVH;
 
 		std::vector<TBVHNode> _tbvh;
+		std::vector<MTBVHNode> _mtbvh;
 		std::vector<uint32_t> _primitive_indices;
 
 		std::vector<RayCast> _rayCasts;
@@ -350,21 +354,22 @@ void ofApp::draw() {
 
 		// Standard BVH
 		std::vector<int32_t> visited_bvh;
-		float tmin;
-		tmin = FLT_MAX;
-		if (intersect_bvh(_BVHScene->_embreeBVH->bvh_root, ro, rd, _BVHScene->_indices, _BVHScene->_points, &tmin, visited_bvh)) {
-			ofSetColor(ofColor::red);
+		{
+			float tmin = FLT_MAX;
+			if (intersect_bvh(_BVHScene->_embreeBVH->bvh_root, ro, rd, _BVHScene->_indices, _BVHScene->_points, &tmin, visited_bvh)) {
+				ofSetColor(ofColor::red);
 
-			ofDrawLine(ro, ro + rd * tmin);
-			ofDrawSphere(ro + rd * tmin, 0.005f);
+				ofDrawLine(ro, ro + rd * tmin);
+				ofDrawSphere(ro + rd * tmin, 0.005f);
 
-			RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
-		}
-		else {
-			ofSetColor(ofColor::gray);
-			ofDrawLine(ro, ro + rd * 1.0f);
+				RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+			}
+			else {
+				ofSetColor(ofColor::gray);
+				ofDrawLine(ro, ro + rd * 1.0f);
 
-			RT_ASSERT(rayCast.tmin == 0.0f);
+				RT_ASSERT(rayCast.tmin == 0.0f);
+			}
 		}
 
 		ofSetColor(ofColor::gray);
@@ -373,24 +378,47 @@ void ofApp::draw() {
 		// Threaded BVH
 		uint32_t primitive_index;
 		std::vector<int32_t> visited_tbvh;
-		tmin = FLT_MAX;
-		if (intersect_tbvh(_BVHScene->_tbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_tbvh)) {
-			ofSetColor(ofColor::red);
+		{
+			float tmin = FLT_MAX;
+			if (intersect_tbvh(_BVHScene->_tbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_tbvh)) {
+				ofSetColor(ofColor::red);
 
-			ofDrawLine(ro, ro + rd * tmin);
-			ofDrawSphere(ro + rd * tmin, 0.005f);
+				ofDrawLine(ro, ro + rd * tmin);
+				ofDrawSphere(ro + rd * tmin, 0.005f);
 
-			RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+				RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+			}
+			else {
+				ofSetColor(ofColor::gray);
+				ofDrawLine(ro, ro + rd * 1.0f);
+
+				RT_ASSERT(rayCast.tmin == 0.0f);
+			}
 		}
-		else {
-			ofSetColor(ofColor::gray);
-			ofDrawLine(ro, ro + rd * 1.0f);
 
-			RT_ASSERT(rayCast.tmin == 0.0f);
-		}
 
 		// Visited Node is must be equals!
-		RT_ASSERT(visited_bvh == visited_tbvh);
+		// RT_ASSERT(visited_bvh == visited_tbvh);
+
+		// MultiThreaded BVH
+		{
+			float tmin = FLT_MAX;
+			std::vector<int32_t> visited_mtbvh;
+			if (intersect_mtbvh(_BVHScene->_mtbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_mtbvh)) {
+				ofSetColor(ofColor::red);
+
+				ofDrawLine(ro, ro + rd * tmin);
+				ofDrawSphere(ro + rd * tmin, 0.005f);
+
+				RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+			}
+			else {
+				ofSetColor(ofColor::gray);
+				ofDrawLine(ro, ro + rd * 1.0f);
+
+				RT_ASSERT(rayCast.tmin == 0.0f);
+			}
+		}
 	}
 
 	//draw_bvh(_gpubvh->_bvh);

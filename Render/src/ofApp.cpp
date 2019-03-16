@@ -136,7 +136,8 @@ namespace rt {
 				auto context = _context;
 
 				// 
-				_tvbhCL = context->createBuffer(_tbvh.data(), _tbvh.size());
+				// _tvbhCL = context->createBuffer(_tbvh.data(), _tbvh.size());
+				_mtvbhCL = context->createBuffer(_mtbvh.data(), _mtbvh.size());
 				_primitive_indicesCL = context->createBuffer(_primitive_indices.data(), _primitive_indices.size());
 				_indicesCL = context->createBuffer(_indices.data(), _indices.size());
 				std::vector<glm::vec4> points(_points.size());
@@ -189,7 +190,8 @@ namespace rt {
 				_kernel->setGlobalArgument(1, *_frameBufferCL);
 				_kernel->setValueArgument(2, glm::ivec4(_camera->resolution_x, _camera->resolution_y, 0, 0));
 
-				_kernel->setGlobalArgument(3, *_tvbhCL);
+				// _kernel->setGlobalArgument(3, *_tvbhCL);
+				_kernel->setGlobalArgument(3, *_mtvbhCL);
 				_kernel->setGlobalArgument(4, *_primitive_indicesCL);
 				_kernel->setGlobalArgument(5, *_indicesCL);
 				_kernel->setGlobalArgument(6, *_pointsCL);
@@ -250,7 +252,8 @@ namespace rt {
 
 		void buildBVH() {
 			_embreeBVH = buildEmbreeBVH(_indices, _points);
-			buildThreadedBVH(_tbvh, _primitive_indices, _embreeBVH->bvh_root);
+			// buildThreadedBVH(_tbvh, _primitive_indices, _embreeBVH->bvh_root);
+			buildMultiThreadedBVH(_mtbvh, _primitive_indices, _embreeBVH->bvh_root);
 		}
 
 		void step() {
@@ -341,7 +344,8 @@ private:
 		std::vector<Material> _materials;
 		std::shared_ptr<EmbreeBVH> _embreeBVH;
 
-		std::vector<TBVHNode> _tbvh;
+		// std::vector<TBVHNode> _tbvh;
+		std::vector<MTBVHNode> _mtbvh;
 		std::vector<uint32_t> _primitive_indices;
 
 		std::vector<Radiance_and_Samplecount> _frameBuffer;
@@ -356,7 +360,8 @@ private:
 		std::shared_ptr<OpenCLBuffer<PixelContext>> _pixelContextsCL;
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _raysCL;
 
-		std::shared_ptr<OpenCLBuffer<TBVHNode>> _tvbhCL;
+		// std::shared_ptr<OpenCLBuffer<TBVHNode>> _tvbhCL;
+		std::shared_ptr<OpenCLBuffer<MTBVHNode>> _mtvbhCL;
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _primitive_indicesCL;
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _indicesCL;
 		std::shared_ptr<OpenCLBuffer<glm::vec4>> _pointsCL;

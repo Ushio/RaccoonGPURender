@@ -17,6 +17,12 @@ namespace rt {
 		u.upper = glm::max(a.upper, b.upper);
 		return u;
 	}
+	inline glm::vec3 AABB_center(const AABB &aabb) {
+		return glm::mix(aabb.lower, aabb.upper, 0.5f);
+	}
+	inline float AABB_center(const AABB &aabb, int axis) {
+		return glm::mix(aabb.lower[axis], aabb.upper[axis], 0.5f);
+	}
 
 	inline void EmbreeErorrHandler(void* userPtr, RTCError code, const char* str) {
 		printf("Embree Error [%d] %s\n", code, str);
@@ -384,6 +390,179 @@ namespace rt {
 			}
 			else {
 				node = tbvh[node].miss_link;
+			}
+		}
+		return intersected;
+	}
+
+	typedef struct {
+		AABB bounds;
+		int32_t hit_link[6];
+		int32_t miss_link[6];
+		int32_t primitive_indices_beg = 0;
+		int32_t primitive_indices_end = 0;
+	} MTBVHNode;
+
+	inline void allocateMultiThreadedBVH(std::vector<MTBVHNode> &mtbvh, BVHNode *bvh) {
+		uint32_t index = mtbvh.size();
+		mtbvh.emplace_back(MTBVHNode());
+		bvh->index = index;
+
+		if (BVHBranch *branch = bvh->branch()) {
+			allocateMultiThreadedBVH(mtbvh, branch->L);
+			allocateMultiThreadedBVH(mtbvh, branch->R);
+		}
+	}
+
+	inline void linkMultiThreadedBVH(std::vector<MTBVHNode> &mtbvh, int direction, std::vector<uint32_t> &primitive_indices, BVHNode *node, AABB *bounds, BVHNode *sibling, BVHNode *parent_sibling) {
+		// hit link is always array neighbor node, we must avoid out of range index
+		// uint32_t neighbor = node->index + 1;
+		// mtbvh[node->index].hit_link[direction] = neighbor < mtbvh.size() ? neighbor : -1;
+
+		if (BVHBranch *branch = node->branch()) {
+			// store bounds
+			if (bounds == nullptr /* root node */) {
+				mtbvh[node->index].bounds = AABB_union(branch->L_bounds, branch->R_bounds);
+			}
+			else {
+				mtbvh[node->index].bounds = *bounds;
+			}
+
+			// hit link
+			mtbvh[node->index].hit_link[direction] = branch->L->index;
+
+			// miss link
+			if (sibling) {
+				// L or Root node
+				mtbvh[node->index].miss_link[direction] = sibling->index;
+			}
+			else {
+				// R node
+				RT_ASSERT(findParentSibling(node) == parent_sibling);
+
+				if (parent_sibling) {
+					mtbvh[node->index].miss_link[direction] = parent_sibling->index;
+				}
+				else {
+					mtbvh[node->index].miss_link[direction] = -1;
+				}
+			}
+
+			// L
+			linkMultiThreadedBVH(mtbvh, direction, primitive_indices, branch->L, &branch->L_bounds, branch->R, branch->R /* update parent_sibling */);
+
+			// R
+			linkMultiThreadedBVH(mtbvh, direction, primitive_indices, branch->R, &branch->R_bounds, nullptr, parent_sibling);
+		}
+		else {
+			auto leaf = node->leaf();
+
+			// it is maybe bad.
+			RT_ASSERT(bounds);
+			mtbvh[node->index].bounds = *bounds;
+
+			// branch の miss linkと同じ考え方
+			BVHNode *linkNode = nullptr;
+			if (sibling) {
+				// L or Root node
+				linkNode = sibling;
+			}
+			else {
+				if (parent_sibling) {
+					linkNode = parent_sibling;
+				}
+			}
+			mtbvh[node->index].miss_link[direction] = mtbvh[node->index].hit_link[direction] = linkNode ? linkNode->index : -1;
+
+			// setup primitive
+			mtbvh[node->index].primitive_indices_beg = primitive_indices.size();
+			for (int i = 0; i < leaf->primitive_count; ++i) {
+				primitive_indices.push_back(leaf->primitive_ids[i]);
+			}
+			mtbvh[node->index].primitive_indices_end = primitive_indices.size();
+		}
+	}
+
+	enum Axis {
+		Axis_XPlus = 0,
+		Axis_XMinus,
+		Axis_YPlus,
+		Axis_YMinus,
+		Axis_ZPlus,
+		Axis_ZMinus,
+	};
+	inline void sortBranchForMultiThreadedBVH(BVHNode *bvh, Axis axis) {
+		if (BVHBranch *branch = bvh->branch()) {
+			float Lc = AABB_center(branch->L_bounds, axis / 2);
+			float Rc = AABB_center(branch->R_bounds, axis / 2);
+
+			bool direction_is_negative = axis & 1;
+			if (direction_is_negative) {
+				std::swap(Lc, Rc); // Reverse result
+			}
+
+			if (Lc < Rc) {
+				// this is good order
+			}
+			else {
+				// this is not good order
+				std::swap(branch->L, branch->R);
+				std::swap(branch->L_bounds, branch->R_bounds);
+			}
+
+			sortBranchForMultiThreadedBVH(branch->L, axis);
+			sortBranchForMultiThreadedBVH(branch->R, axis);
+		}
+	}
+
+	inline void buildMultiThreadedBVH(std::vector<MTBVHNode> &mtbvh, std::vector<uint32_t> &primitive_indices, BVHNode *bvh) {
+		allocateMultiThreadedBVH(mtbvh, bvh);
+
+		for (int i = 0; i < 6; ++i) {
+			sortBranchForMultiThreadedBVH(bvh, (Axis)i);
+			linkMultiThreadedBVH(mtbvh, i, primitive_indices, bvh, nullptr, nullptr, nullptr);
+		}
+	}
+
+	inline bool intersect_mtbvh(const std::vector<MTBVHNode> &mtbvh, std::vector<uint32_t> &primitive_indices, const std::vector<uint32_t> &indices, const std::vector<glm::vec3> &points, glm::vec3 ro, glm::vec3 rd, float *tmin, uint32_t *primitive_index, std::vector<int32_t> &visited) {
+		glm::vec3 abs_rd = glm::abs(rd);
+		float maxYZ = std::max(abs_rd.y, abs_rd.z);
+		float maxXZ = std::max(abs_rd.x, abs_rd.z);
+
+		Axis direction;
+		if (maxYZ < abs_rd.x) {
+			direction = 0.0f < rd.x ? Axis_XPlus : Axis_XMinus;
+		}
+		else if (maxXZ < abs_rd.y) {
+			direction = 0.0f < rd.y ? Axis_YPlus : Axis_YMinus;
+		}
+		else {
+			direction = 0.0f < rd.z ? Axis_ZPlus : Axis_ZMinus;
+		}
+		
+		glm::vec3 one_over_rd = glm::vec3(1.0f) / rd;
+		bool intersected = false;
+		int node = 0;
+		while (0 <= node) {
+			RT_ASSERT(node < mtbvh.size());
+			visited.push_back(node);
+
+			auto bounds = mtbvh[node].bounds;
+			if (slabs(bounds.lower, bounds.upper, ro, one_over_rd, *tmin)) {
+				for (int i = mtbvh[node].primitive_indices_beg; i < mtbvh[node].primitive_indices_end; ++i) {
+					int index = primitive_indices[i] * 3;
+					glm::vec3 v0 = points[indices[index]];
+					glm::vec3 v1 = points[indices[index + 1]];
+					glm::vec3 v2 = points[indices[index + 2]];
+					if (intersect_ray_triangle(ro, rd, v0, v1, v2, tmin)) {
+						intersected = true;
+						*primitive_index = primitive_indices[i];
+					}
+				}
+				node = mtbvh[node].hit_link[direction];
+			}
+			else {
+				node = mtbvh[node].miss_link[direction];
 			}
 		}
 		return intersected;

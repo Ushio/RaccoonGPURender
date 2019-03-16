@@ -195,14 +195,6 @@ typedef struct {
 	float3 upper;
 } AABB;
 
-typedef struct {
-	AABB bounds;
-	int hit_link;
-	int miss_link;
-	int primitive_indices_beg;
-	int primitive_indices_end;
-} TBVHNode;
-
 struct RayHit_t
 {
 	float tmin;
@@ -211,10 +203,79 @@ struct RayHit_t
 };
 typedef struct RayHit_t RayHit;
 
+// typedef struct {
+// 	AABB bounds;
+// 	int hit_link;
+// 	int miss_link;
+// 	int primitive_indices_beg;
+// 	int primitive_indices_end;
+// } TBVHNode;
+
+// /* 
+//  hit is expected uninitialize.
+// */
+// bool intersect_tbvh(__global TBVHNode* tbvh, __global uint* primitive_indices, __global uint* indices, __global float4* points, float3 ro, float3 rd, RayHit *hit) {
+// 	float3 one_over_rd = (float3)(1.0f) / rd;
+// 	bool intersected = false;
+// 	int node = 0;
+// 	float tmin = FLT_MAX;
+// 	float2 uv;
+// 	int primitive_index;
+
+// 	while (0 <= node) {
+// 		AABB bounds = tbvh[node].bounds;
+// 		if (slabs(bounds.lower.xyz, bounds.upper.xyz, ro, one_over_rd, tmin)) {
+// 			int beg = tbvh[node].primitive_indices_beg;
+// 			int end = tbvh[node].primitive_indices_end;
+// 			for (int i = beg; i < end; ++i) {
+// 				int index = primitive_indices[i] * 3;
+// 				float3 v0 = points[indices[index    ]].xyz;
+// 				float3 v1 = points[indices[index + 1]].xyz;
+// 				float3 v2 = points[indices[index + 2]].xyz;
+// 				if (intersect_ray_triangle(ro, rd, v0, v1, v2, &tmin, &uv)) {
+// 					intersected = true;
+// 					primitive_index = primitive_indices[i];
+// 				}
+// 			}
+// 			node = tbvh[node].hit_link;
+// 		}
+// 		else {
+// 			node = tbvh[node].miss_link;
+// 		}
+// 	}
+// 	hit->tmin = tmin;
+// 	hit->primitive_index = primitive_index;
+// 	hit->uv = uv;
+// 	return intersected;
+// }
+
+typedef struct {
+	AABB bounds;
+	int hit_link[6];
+	int miss_link[6];
+	int primitive_indices_beg;
+	int primitive_indices_end;
+} MTBVHNode;
+
 /* 
  hit is expected uninitialize.
 */
-bool intersect_tbvh(__global TBVHNode* tbvh, __global uint* primitive_indices, __global uint* indices, __global float4* points, float3 ro, float3 rd, RayHit *hit) {
+bool intersect_tbvh(__global MTBVHNode* tbvh, __global uint* primitive_indices, __global uint* indices, __global float4* points, float3 ro, float3 rd, RayHit *hit) {
+	float3 abs_rd = fabs(rd);
+	float maxYZ = max(abs_rd.y, abs_rd.z);
+	float maxXZ = max(abs_rd.x, abs_rd.z);
+
+	int direction;
+	if (maxYZ < abs_rd.x) {
+		direction = 0.0f < rd.x ? 0 : 1;
+	}
+	else if (maxXZ < abs_rd.y) {
+		direction = 0.0f < rd.y ? 2 : 3;
+	}
+	else {
+		direction = 0.0f < rd.z ? 4 : 5;
+	}
+	
 	float3 one_over_rd = (float3)(1.0f) / rd;
 	bool intersected = false;
 	int node = 0;
@@ -237,10 +298,10 @@ bool intersect_tbvh(__global TBVHNode* tbvh, __global uint* primitive_indices, _
 					primitive_index = primitive_indices[i];
 				}
 			}
-			node = tbvh[node].hit_link;
+			node = tbvh[node].hit_link[direction];
 		}
 		else {
-			node = tbvh[node].miss_link;
+			node = tbvh[node].miss_link[direction];
 		}
 	}
 	hit->tmin = tmin;
@@ -264,7 +325,7 @@ void PathTracing(
 	__global PixelContext* context,
 	__global float4 *radiance_and_samplecount,
 	const int4 resolution,
-	__global TBVHNode* tbvh, 
+	__global MTBVHNode* tbvh, 
 	__global uint* primitive_indices, 
 	__global uint* indices, 
 	__global float4* points,

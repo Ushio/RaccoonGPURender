@@ -177,8 +177,27 @@ void draw_bounds(const rt::AABB &aabb) {
 }
 
 rt::BVHScene *_BVHScene = nullptr;
-int _width;
-int _height;
+
+inline glm::vec3 select(glm::vec3 a, glm::vec3 b, glm::bvec3 c) {
+	return glm::vec3(
+		c.x ? b.x : a.x,
+		c.y ? b.y : a.y,
+		c.z ? b.z : a.z
+	);
+}
+
+inline bool slabs(glm::vec3 p0, glm::vec3 p1, glm::vec3 ro, glm::vec3 one_over_rd) {
+	glm::vec3 t0 = (p0 - ro) * one_over_rd;
+	glm::vec3 t1 = (p1 - ro) * one_over_rd;
+
+	t0 = select(t0, -t1, glm::isnan(t0));
+	t1 = select(t1, -t0, glm::isnan(t1));
+	
+	glm::vec3 tmin = min(t0, t1), tmax = max(t0, t1);
+	float region_min = glm::compMax(tmin);
+	float region_max = glm::compMin(tmax);
+	return region_min <= region_max;
+}
 
 //--------------------------------------------------------------
 void ofApp::setup() {

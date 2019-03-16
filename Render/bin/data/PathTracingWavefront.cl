@@ -57,6 +57,7 @@ inline bool intersect_ray_triangle(float3 ro, float3 rd, float3 v0, float3 v1, f
 	// const float kEpsilon = 1.0e-5;
 	// if (kEpsilon < fabs(det) && 0.0f < u && 0.0f < v && u + v < 1.0f && 0.0f < t & t < *tmin) {
 	// 	*tmin = t;
+	// 	*uv = (float2)(u, v);
 	// 	return true;
 	// }
 	// return false;
@@ -210,6 +211,10 @@ float compMax(float3 v){
 bool slabs(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float near_t) {
 	float3 t0 = (p0 - ro) * one_over_rd;
 	float3 t1 = (p1 - ro) * one_over_rd;
+
+	t0 = select(t0, -t1, isnan(t0));
+	t1 = select(t1, -t0, isnan(t1));
+
 	float3 tmin = min(t0, t1), tmax = max(t0, t1);
 	float region_min = compMax(tmin);
 	float region_max = compMin(tmax);

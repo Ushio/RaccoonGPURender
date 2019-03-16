@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <CL/cl.h>
+#include <CL/cl_platform.h>
 #include "assertion.hpp"
 
 class Stopwatch {
@@ -116,6 +117,10 @@ namespace rt {
 		void unmap(T *value) {
 			cl_int status = clEnqueueUnmapMemObject(_queue, _memory.get(), value, 0, nullptr, nullptr);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
+		}
+		void blocking_read(T *value) {
+			cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_TRUE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 		}
 	private:
 		cl_context _context;
@@ -247,14 +252,36 @@ namespace rt {
 		return status;
 	}
 	
+	class OpenCLBuildOptions {
+	public:
+		OpenCLBuildOptions() {
+
+		}
+		OpenCLBuildOptions& include(std::string includePath) {
+			_includes.push_back(includePath);
+			return *this;
+		}
+
+		std::string option() const {
+			// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clBuildProgram.html
+			std::stringstream option_stream;
+			for (auto p : _includes) {
+				option_stream << "-I " << p << " ";
+			}
+			option_stream << "-cl-denorms-are-zero";
+			return option_stream.str();
+		}
+	private:
+		std::vector<std::string> _includes;
+	};
 	class OpenCLKernel {
 	public:
-		OpenCLKernel(const char *kernel_source, const char *platfrom_name) {
+		OpenCLKernel(const char *kernel_source, OpenCLBuildOptions options, const char *platfrom_name) {
 			_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(platfrom_name));
-			construct(kernel_source);
+			construct(kernel_source, options);
 		}
-		OpenCLKernel(const char *kernel_source, std::shared_ptr<OpenCLContext> context) :_context(context) {
-			construct(kernel_source);
+		OpenCLKernel(const char *kernel_source, OpenCLBuildOptions options, std::shared_ptr<OpenCLContext> context) :_context(context) {
+			construct(kernel_source, options);
 		}
 
 		void selectKernel(const char *kernel) {
@@ -280,12 +307,17 @@ namespace rt {
 			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(memory_object), &memory_object);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
-
 		std::shared_ptr<OpenCLEvent> launch(uint32_t offset, uint32_t length) {
 			size_t global_work_offset[] = { offset };
 			size_t global_work_size[] = { length };
 			cl_event kernel_event;
-			cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
+			cl_int status = clEnqueueNDRangeKernel(
+				_context->queue(), 
+				_kernel.get(), 1 /*dim*/,
+				global_work_offset /*global_work_offset*/, 
+				global_work_size /*global_work_size*/, 
+				nullptr /*local_work_size*/,
+				0, nullptr, &kernel_event);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
 		}
@@ -323,12 +355,13 @@ namespace rt {
 			return _context;
 		}
 	private:
-		void construct(const char *kernel_source) {
-			std::stringstream option_stream;
+		void construct(const char *kernel_source, OpenCLBuildOptions options) {
+			// std::stringstream option_stream;
+			// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clBuildProgram.html
 			// option_stream << "-I " << ofToDataPath("", true);
 			// option_stream << " ";
-			option_stream << "-cl-denorms-are-zero";
-			std::string options = option_stream.str();
+			// option_stream << "-cl-denorms-are-zero";
+			// std::string options = option_stream.str();
 
 			const char *program_sources[] = { kernel_source };
 
@@ -339,7 +372,7 @@ namespace rt {
 
 			_program = decltype(_program)(program, clReleaseProgram);
 
-			status = clBuildProgram(program, 0, nullptr, options.c_str(), NULL, NULL);
+			status = clBuildProgram(program, 0, nullptr, options.option().c_str(), NULL, NULL);
 			if (status == CL_BUILD_PROGRAM_FAILURE) {
 				std::string build_log;
 				status = opencl_build_log(build_log, program, _context->device());

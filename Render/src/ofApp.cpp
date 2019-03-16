@@ -10,6 +10,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+#include "online.hpp"
+
 //inline ofPixels toOf(const rt::Image &image) {
 //	ofPixels pixels;
 //	pixels.allocate(image.width(), image.height(), OF_IMAGE_COLOR);
@@ -124,9 +126,10 @@ namespace rt {
 
 			try {
 				_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+				// _context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_INTEL));
 				// std::string kernel_src = ofBufferFromFile("PathTracing.cl").getText();
 				std::string kernel_src = ofBufferFromFile("PathTracingWavefront.cl").getText();
-				_kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), _context));
+				_kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), OpenCLBuildOptions(), _context));
 				_kernel->selectKernel("PathTracing");
 
 				auto context = _context;
@@ -248,11 +251,14 @@ namespace rt {
 				auto e = _renderEvents.front();
 				_renderEvents.pop();
 
+				static OnlineMean<double> mean;
 				Stopwatch sw;
 				double elapsed = e->wait();
-				printf("gpu %.5f ms / wait %.5f ms\n", elapsed, sw.elapsed());
+				mean.addSample(elapsed);
+				printf("gpu %.5f ms (avg %.5f) / wait %.5f ms\n", elapsed, mean.mean(), sw.elapsed());
 
 				if (_mapEvent && _mapEvent->status() == CL_COMPLETE) {
+					// TODO Mapした所からそのままReadしたほうが直接的
 					Stopwatch sw;
 					std::copy(_mapPtr, _mapPtr + _frameBuffer.size(), _frameBuffer.begin());
 					_frameBufferCL->unmap(_mapPtr);

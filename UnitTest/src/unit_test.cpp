@@ -13,15 +13,18 @@
 #include "triangle_util.hpp"
 #include "assertion.hpp"
 #include "value_prportional_sampler.hpp"
+#include "aabb_cases.hpp"
+#include "threaded_bvh.hpp"
+#include "raccoon_ocl.hpp"
 
 void run_unit_test() {
 	static Catch::Session session;
-	//char* custom_argv[] = {
-	//	"",
-	//	"[random]"
-	//};
-	// session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
-	session.run();
+	char* custom_argv[] = {
+		"",
+		"[AABB]"
+	};
+	 session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
+	// session.run();
 }
 
 TEST_CASE("random", "[random]") {
@@ -291,6 +294,161 @@ TEST_CASE("ValueProportionalSampler", "[ValueProportionalSampler]") {
 		for (int i = 0; i < h.size(); ++i) {
 			double prob = (double)h[i] / N;
 			REQUIRE(prob == Approx(sampler.probability(i)).margin(1.0e-2));
+		}
+	}
+}
+
+TEST_CASE("AABB", "[AABB]") {
+	using namespace rt;
+
+	// ランダム生成・ランダム光線
+	SECTION("aabb_cases_1") {
+		using namespace aabb_cases_1;
+		for (auto c : cases) {
+			auto ro = glm::vec3(c.ro);
+			auto rd = glm::vec3(c.rd);
+
+			bool hit = slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, FLT_MAX);
+			REQUIRE(hit == c.hit);
+			if (hit) {
+				// o---> |(tmin)     |(farclip_t)
+				// expect same hit
+				REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, c.tmin + 1.0f));
+
+				bool origin_inbox = glm::all(glm::lessThan(p0, ro) && glm::lessThan(ro, p1));
+				if (origin_inbox) {
+					// |    o->  |(farclip_t)    |
+					// always hit
+					REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, c.tmin * 0.5f));
+				}
+				else {
+					// o->  |(farclip_t)    |   box   |
+					// always no hit
+					REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, c.tmin * 0.5f) == false);
+				}
+			}
+		}
+	}
+
+	// ランダム生成・軸平行光線
+	SECTION("aabb_cases_2") {
+		using namespace aabb_cases_2;
+		for (auto c : cases) {
+			auto ro = glm::vec3(c.ro);
+			auto rd = glm::vec3(c.rd);
+
+			bool hit = slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, FLT_MAX);
+			REQUIRE(hit == c.hit);
+			if (hit) {
+				// o---> |(tmin)     |(farclip_t)
+				// expect same hit
+				REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, c.tmin + 1.0f));
+
+				bool origin_inbox = glm::all(glm::lessThan(p0, ro) && glm::lessThan(ro, p1));
+				if (origin_inbox) {
+					// |    o->  |(farclip_t)    |
+					// always hit
+					REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, c.tmin * 0.5f));
+				}
+				else {
+					// o->  |(farclip_t)    |   box   |
+					// always no hit
+					REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / c.rd, c.tmin * 0.5f) == false);
+				}
+			}
+		}
+	}
+
+	SECTION("aabb_cases_3") {
+		// on box surface, expect all hit
+		using namespace aabb_cases_3;
+		for (auto c : cases) {
+			auto ro = glm::vec3(c.ro);
+			auto rd = glm::vec3(c.rd);
+			REQUIRE(slabs(p0, p1, ro, glm::vec3(1.0f) / rd, FLT_MAX));
+		}
+	}
+	
+	SECTION("aabb_cases_1 opencl") {
+		using namespace aabb_cases_1;
+
+		auto context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+		OpenCLBuildOptions options;
+		options.include(ofToDataPath("../../../kernels", true));
+
+		std::string kernel_src = ofBufferFromFile("aabb_test_1.cl").getText();
+
+		std::vector<int> results(cases.size());
+		std::shared_ptr<OpenCLBuffer<Case>> casesCL = context->createBuffer(cases.data(), cases.size());
+		std::shared_ptr<OpenCLBuffer<int>> resultsCL = context->createBuffer(results.data(), results.size());
+
+		auto kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), options, context));
+		kernel->selectKernel("check");
+		kernel->setGlobalArgument(0, *casesCL);
+		kernel->setGlobalArgument(1, *resultsCL);
+		kernel->setValueArgument(2, glm::vec4(p0, 0.0f));
+		kernel->setValueArgument(3, glm::vec4(p1, 0.0f));
+		kernel->launch(0, cases.size());
+		resultsCL->blocking_read(results.data());
+		casesCL->blocking_read(cases.data());
+
+		for (int i = 0; i < results.size(); ++i) {
+			REQUIRE(results[i]);
+		}
+	}
+	SECTION("aabb_cases_2 opencl") {
+		using namespace aabb_cases_2;
+
+		auto context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+		OpenCLBuildOptions options;
+		options.include(ofToDataPath("../../../kernels", true));
+
+		std::string kernel_src = ofBufferFromFile("aabb_test_1.cl").getText();
+
+		std::vector<int> results(cases.size());
+		std::shared_ptr<OpenCLBuffer<Case>> casesCL = context->createBuffer(cases.data(), cases.size());
+		std::shared_ptr<OpenCLBuffer<int>> resultsCL = context->createBuffer(results.data(), results.size());
+
+		auto kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), options, context));
+		kernel->selectKernel("check");
+		kernel->setGlobalArgument(0, *casesCL);
+		kernel->setGlobalArgument(1, *resultsCL);
+		kernel->setValueArgument(2, glm::vec4(p0, 0.0f));
+		kernel->setValueArgument(3, glm::vec4(p1, 0.0f));
+		kernel->launch(0, cases.size());
+		resultsCL->blocking_read(results.data());
+		casesCL->blocking_read(cases.data());
+
+		for (int i = 0; i < results.size(); ++i) {
+			REQUIRE(results[i]);
+		}
+	}
+
+	SECTION("aabb_cases_3 opencl") {
+		using namespace aabb_cases_3;
+
+		auto context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+		OpenCLBuildOptions options;
+		options.include(ofToDataPath("../../../kernels", true));
+
+		std::string kernel_src = ofBufferFromFile("aabb_test_2.cl").getText();
+
+		std::vector<int> results(cases.size());
+		std::shared_ptr<OpenCLBuffer<Case>> casesCL = context->createBuffer(cases.data(), cases.size());
+		std::shared_ptr<OpenCLBuffer<int>> resultsCL = context->createBuffer(results.data(), results.size());
+
+		auto kernel = std::shared_ptr<OpenCLKernel>(new OpenCLKernel(kernel_src.c_str(), options, context));
+		kernel->selectKernel("check");
+		kernel->setGlobalArgument(0, *casesCL);
+		kernel->setGlobalArgument(1, *resultsCL);
+		kernel->setValueArgument(2, glm::vec4(p0, 0.0f));
+		kernel->setValueArgument(3, glm::vec4(p1, 0.0f));
+		kernel->launch(0, cases.size());
+		resultsCL->blocking_read(results.data());
+		casesCL->blocking_read(cases.data());
+
+		for (int i = 0; i < results.size(); ++i) {
+			REQUIRE(results[i]);
 		}
 	}
 }

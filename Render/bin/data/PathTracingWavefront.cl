@@ -289,11 +289,10 @@ bool intersect_tbvh(__global MTBVHNode* tbvh, uint node_count, __global int *lin
 	}
 	
 	float3 one_over_rd = (float3)(1.0f) / rd;
-	bool intersected = false;
 	int node = 0;
 	float tmin = FLT_MAX;
 	float2 uv;
-	int primitive_index;
+	int primitive_index = -1;
 
  	uint link_stride = node_count * 2;
  	uint miss_offset = node_count;
@@ -310,7 +309,6 @@ bool intersect_tbvh(__global MTBVHNode* tbvh, uint node_count, __global int *lin
 				float3 v1 = points[indices[index + 1]].xyz;
 				float3 v2 = points[indices[index + 2]].xyz;
 				if (intersect_ray_triangle(ro, rd, v0, v1, v2, &tmin, &uv)) {
-					intersected = true;
 					primitive_index = primitive_indices[i];
 				}
 			}
@@ -323,7 +321,7 @@ bool intersect_tbvh(__global MTBVHNode* tbvh, uint node_count, __global int *lin
 	hit->tmin = tmin;
 	hit->primitive_index = primitive_index;
 	hit->uv = uv;
-	return intersected;
+	return 0 <= primitive_index;
 }
 
 float3 lambertian_brdf(float3 wi, float3 wo, float3 Cd, float3 Ng) {

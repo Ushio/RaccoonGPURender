@@ -251,16 +251,28 @@ typedef struct RayHit_t RayHit;
 
 typedef struct {
 	AABB bounds;
-	int hit_link[6];
-	int miss_link[6];
 	int primitive_indices_beg;
 	int primitive_indices_end;
 } MTBVHNode;
 
+/*
+ links layout
+ link_stride = (node count) * 2
+
+ dir0: [hit, miss, hit, miss, ....(node count * 2)]
+ dir1: [hit, miss, hit, miss, ....(node count * 2)]
+ dir2: [hit, miss, hit, miss, ....(node count * 2)]
+ dir3: [hit, miss, hit, miss, ....(node count * 2)]
+ dir4: [hit, miss, hit, miss, ....(node count * 2)]
+ dir5: [hit, miss, hit, miss, ....(node count * 2)]
+
+int hit_link = links[link_stride * direction + node]
+*/
+
 /* 
  hit is expected uninitialize.
 */
-bool intersect_tbvh(__global MTBVHNode* tbvh, __global uint* primitive_indices, __global uint* indices, __global float4* points, float3 ro, float3 rd, RayHit *hit) {
+bool intersect_tbvh(__global MTBVHNode* tbvh, uint node_count, __global int *links, __global uint* primitive_indices, __global uint* indices, __global float4* points, float3 ro, float3 rd, RayHit *hit) {
 	float3 abs_rd = fabs(rd);
 	float maxYZ = max(abs_rd.y, abs_rd.z);
 	float maxXZ = max(abs_rd.x, abs_rd.z);
@@ -283,6 +295,10 @@ bool intersect_tbvh(__global MTBVHNode* tbvh, __global uint* primitive_indices, 
 	float2 uv;
 	int primitive_index;
 
+ 	uint link_stride = node_count * 2;
+ 	uint miss_offset = node_count;
+	__global int *hit_miss_link = links + link_stride * direction;
+
 	while (0 <= node) {
 		AABB bounds = tbvh[node].bounds;
 		if (slabs(bounds.lower.xyz, bounds.upper.xyz, ro, one_over_rd, tmin)) {
@@ -298,10 +314,10 @@ bool intersect_tbvh(__global MTBVHNode* tbvh, __global uint* primitive_indices, 
 					primitive_index = primitive_indices[i];
 				}
 			}
-			node = tbvh[node].hit_link[direction];
+			node = hit_miss_link[node * 2];
 		}
 		else {
-			node = tbvh[node].miss_link[direction];
+			node = hit_miss_link[node * 2 + 1];
 		}
 	}
 	hit->tmin = tmin;
@@ -326,6 +342,8 @@ void PathTracing(
 	__global float4 *radiance_and_samplecount,
 	const int4 resolution,
 	__global MTBVHNode* tbvh, 
+	uint node_count, 
+	__global int *links,
 	__global uint* primitive_indices, 
 	__global uint* indices, 
 	__global float4* points,
@@ -367,7 +385,7 @@ void PathTracing(
 		rays[g_id]++;
 
 		RayHit hit;
-		if(intersect_tbvh(tbvh, primitive_indices, indices, points, ro, rd, &hit)) {
+		if(intersect_tbvh(tbvh, node_count, links, primitive_indices, indices, points, ro, rd, &hit)) {
 			float3 wo = -rd;
 
 			int v_index = hit.primitive_index * 3;

@@ -102,6 +102,12 @@ namespace rt {
 		float3 object_plane_bv; // B * objectplane_height
 	} Camera;
 
+	typedef struct {
+		AABB bounds;
+		int32_t primitive_indices_beg = 0;
+		int32_t primitive_indices_end = 0;
+	} MTBVHNodeWithoutLink;
+
 	class GPUScene {
 	public:
 		GPUScene(std::shared_ptr<houdini_alembic::AlembicScene> scene) :_scene(scene) {
@@ -135,9 +141,24 @@ namespace rt {
 				
 				auto context = _context;
 
-				// 
-				// _tvbhCL = context->createBuffer(_tbvh.data(), _tbvh.size());
-				_mtvbhCL = context->createBuffer(_mtbvh.data(), _mtbvh.size());
+				std::vector<MTBVHNodeWithoutLink> mtbvhCL(_mtbvh.size());
+				std::vector<int32_t> linksCL(_mtbvh.size() * 12);
+				int link_stride = _mtbvh.size() * 2;
+
+				for (int i = 0; i < _mtbvh.size(); ++i) {
+					mtbvhCL[i].bounds = _mtbvh[i].bounds;
+					mtbvhCL[i].primitive_indices_beg = _mtbvh[i].primitive_indices_beg;
+					mtbvhCL[i].primitive_indices_end = _mtbvh[i].primitive_indices_end;
+
+					for (int j = 0; j < 6; ++j) {
+						linksCL[j * link_stride + i * 2]     = _mtbvh[i].hit_link[j];
+						linksCL[j * link_stride + i * 2 + 1] = _mtbvh[i].miss_link[j];
+					}
+				}
+
+				_mtvbhCL = context->createBuffer(mtbvhCL.data(), mtbvhCL.size());
+				_linksCL = context->createBuffer(linksCL.data(), linksCL.size());
+
 				_primitive_indicesCL = context->createBuffer(_primitive_indices.data(), _primitive_indices.size());
 				_indicesCL = context->createBuffer(_indices.data(), _indices.size());
 				std::vector<glm::vec4> points(_points.size());
@@ -189,14 +210,14 @@ namespace rt {
 				_kernel->setGlobalArgument(0, *_pixelContextsCL);
 				_kernel->setGlobalArgument(1, *_frameBufferCL);
 				_kernel->setValueArgument(2, glm::ivec4(_camera->resolution_x, _camera->resolution_y, 0, 0));
-
-				// _kernel->setGlobalArgument(3, *_tvbhCL);
 				_kernel->setGlobalArgument(3, *_mtvbhCL);
-				_kernel->setGlobalArgument(4, *_primitive_indicesCL);
-				_kernel->setGlobalArgument(5, *_indicesCL);
-				_kernel->setGlobalArgument(6, *_pointsCL);
-				_kernel->setGlobalArgument(7, *_cameraCL);
-				_kernel->setGlobalArgument(8, *_raysCL);
+				_kernel->setValueArgument (4, (uint32_t)_mtbvh.size());
+				_kernel->setGlobalArgument(5, *_linksCL);
+				_kernel->setGlobalArgument(6, *_primitive_indicesCL);
+				_kernel->setGlobalArgument(7, *_indicesCL);
+				_kernel->setGlobalArgument(8, *_pointsCL);
+				_kernel->setGlobalArgument(9, *_cameraCL);
+				_kernel->setGlobalArgument(10, *_raysCL);
 
 				for (int i = 0; i < 4; ++i) {
 					_renderEvents.push(_kernel->launch(0, _frameBuffer.size()));
@@ -361,7 +382,9 @@ private:
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _raysCL;
 
 		// std::shared_ptr<OpenCLBuffer<TBVHNode>> _tvbhCL;
-		std::shared_ptr<OpenCLBuffer<MTBVHNode>> _mtvbhCL;
+		std::shared_ptr<OpenCLBuffer<MTBVHNodeWithoutLink>> _mtvbhCL;
+		std::shared_ptr<OpenCLBuffer<int32_t>> _linksCL;
+
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _primitive_indicesCL;
 		std::shared_ptr<OpenCLBuffer<uint32_t>> _indicesCL;
 		std::shared_ptr<OpenCLBuffer<glm::vec4>> _pointsCL;

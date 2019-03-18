@@ -21,7 +21,7 @@ void run_unit_test() {
 	static Catch::Session session;
 	char* custom_argv[] = {
 		"",
-		"[AABB]"
+		"[random]"
 	};
 	 session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
 	// session.run();
@@ -47,6 +47,9 @@ TEST_CASE("random", "[random]") {
 	};
 	SECTION("XoroshiroPlus128") {
 		run(&rt::XoroshiroPlus128());
+	}
+	SECTION("Xoshiro128Plus") {
+		run(&rt::Xoshiro128Plus());
 	}
 	SECTION("Xor64") {
 		run(&rt::Xor64());

@@ -5,7 +5,7 @@
   <PropertyGroup />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(VcpkgRoot)include\OpenExr;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common;C:\Program Files\Intel\Embree3 x64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common;C:\Program Files\Intel\Embree3 x64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -19,11 +19,8 @@ for /d %%f in ("$(OF_ROOT)\libs\*") do (if exist "%%f\lib\vs\$(Platform_Actual)\
 if errorlevel 1 exit 0 else exit %errorlevel%</Command>
     </PostBuildEvent>
     <PreBuildEvent>
-      <Command>del $(TargetDir)Alembic.dll
-del $(TargetDir)Half.dll
-del $(TargetDir)Iex-2_2.dll
-del $(TargetDir)Imath-2_2.dll
-</Command>
+      <Command>
+      </Command>
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup />

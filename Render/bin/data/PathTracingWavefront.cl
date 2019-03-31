@@ -428,7 +428,7 @@ void PathTracing(
 			}
 			T /= continue_p;
 
-			ro = ro + rd * hit.tmin + Ng * 1.0e-5f;
+			ro = ro + rd * hit.tmin + Ng * 1.0e-4f;
 			rd = wi;
 		} else {
 			L += T * (float3)(0.8f);

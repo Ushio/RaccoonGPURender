@@ -427,7 +427,9 @@ void ofApp::setup() {
 void ofApp::loadScene() {
 	houdini_alembic::AlembicStorage storage;
 	std::string error_message;
-	storage.open(ofToDataPath("../../../scenes/CornelBox.abc"), error_message);
+	// storage.open(ofToDataPath("../../../scenes/CornelBox.abc"), error_message);
+	storage.open(ofToDataPath("../../../scenes/CornelBox_dragon.abc"), error_message);
+	
 
 	if (storage.isOpened()) {
 		std::string error_message;

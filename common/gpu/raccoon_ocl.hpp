@@ -2,6 +2,8 @@
 
 #include <string>
 #include <vector>
+#include <map>
+#include <algorithm>
 
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
@@ -85,7 +87,6 @@ namespace rt {
 			, _queue(queue)
 			, _length(length) {
 
-			// 
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, length * sizeof(T), value, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
@@ -122,13 +123,18 @@ namespace rt {
 	class OpenCLContext {
 	public:
 		struct PlatformInfo {
-			std::string platform_profile;
-			std::string platform_version;
-			std::string platform_name;
-			std::string platform_vender;
-			std::string platform_extensions;
+			std::string profile;
+			std::string version;
+			std::string name;
+			std::string vender;
+			std::string extensions;
 		};
-		OpenCLContext(const char *target_platform_name) {
+		struct DeviceInfo {
+			std::string name;
+			std::string version;
+			std::string extensions;
+		};
+		OpenCLContext() {
 			cl_int status;
 			cl_uint numOfPlatforms;
 			status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
@@ -141,51 +147,59 @@ namespace rt {
 
 			for (cl_platform_id platform : platforms)
 			{
-				PlatformInfo info;
-				status = opencl_platform_info(info.platform_profile, platform, CL_PLATFORM_PROFILE);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(info.platform_version, platform, CL_PLATFORM_VERSION);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(info.platform_name, platform, CL_PLATFORM_NAME);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(info.platform_vender, platform, CL_PLATFORM_VENDOR);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(info.platform_extensions, platform, CL_PLATFORM_EXTENSIONS);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				PlatformInfo platform_info;
+				status = opencl_platform_info(platform_info.profile, platform, CL_PLATFORM_PROFILE);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.version, platform, CL_PLATFORM_VERSION);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.name, platform, CL_PLATFORM_NAME);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.vender, platform, CL_PLATFORM_VENDOR);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.extensions, platform, CL_PLATFORM_EXTENSIONS);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
 
-				if (info.platform_name == std::string(target_platform_name)) {
-					_platform = platform;
-					_platform_info = info;
+				cl_uint numOfDevices;
+				status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numOfDevices);
+				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+
+				std::vector<cl_device_id> deviceIds(numOfDevices);
+				status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numOfDevices, deviceIds.data(), nullptr);
+				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+
+				for (cl_device_id device_id : deviceIds) {
+					DeviceInfo device_info;
+					status = opencl_device_info(device_info.name, device_id, CL_DEVICE_NAME);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					status = opencl_device_info(device_info.version, device_id, CL_DEVICE_VERSION);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					status = opencl_device_info(device_info.extensions, device_id, CL_DEVICE_EXTENSIONS);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+
+					DeviceContext deviceContext;
+					deviceContext.platform_info = platform_info;
+					deviceContext.device_info = device_info;
+					deviceContext.device_id = device_id;
+
+					// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateContext.html
+					cl_context context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &status);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateContext() failed");
+					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateContext() failed");
+					deviceContext.context = std::shared_ptr<std::remove_pointer<cl_context>::type>(context, clReleaseContext);
+
+					// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
+					cl_command_queue queue = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
+					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
+					deviceContext.queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
+
+					_deviceContexts.push_back(deviceContext);
 				}
 			}
-			REQUIRE_OR_EXCEPTION(_platform != nullptr, "target platform not found");
 
-			cl_uint numOfDevices;
-			status = clGetDeviceIDs(_platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numOfDevices);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
-			REQUIRE_OR_EXCEPTION(0 < numOfDevices, "no available devices");
-
-			std::vector<cl_device_id> deviceIds(numOfDevices);
-			status = clGetDeviceIDs(_platform, CL_DEVICE_TYPE_ALL, numOfDevices, deviceIds.data(), nullptr);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
-
-			_device = deviceIds[0];
-
-			// _device_name
-			status = opencl_device_info(_device_name, _device, CL_DEVICE_NAME);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
-
-			cl_context_properties properties[] = {
-				CL_CONTEXT_PLATFORM, (cl_context_properties)_platform,
-				0
+			std::map<std::string, int> priority = {
+				{kPLATFORM_NAME_AMD,    3},
+				{kPLATFORM_NAME_NVIDIA, 2},
+				{kPLATFORM_NAME_INTEL,  1},
 			};
-
-			// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateContext.html
-			cl_context context = clCreateContext(properties, 1, &_device, NULL, NULL, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateContext() failed");
-			REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateContext() failed");
-			_context = decltype(_context)(context, clReleaseContext);
-
-			// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
-			cl_command_queue queue = clCreateCommandQueue(_context.get(), _device, CL_QUEUE_PROFILING_ENABLE, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
-			REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
-			_queue = decltype(_queue)(queue, clReleaseCommandQueue);
+			std::sort(_deviceContexts.begin(), _deviceContexts.end(), [&](const DeviceContext &a, const DeviceContext &b) {
+				return priority[a.platform_info.name] > priority[b.platform_info.name];
+			});
 		}
 		~OpenCLContext() {
 
@@ -193,36 +207,38 @@ namespace rt {
 		OpenCLContext(const OpenCLContext&) = delete;
 		void operator=(const OpenCLContext&) = delete;
 
-		cl_context context() const {
-			return _context.get();
+		int deviceCount() const {
+			return _deviceContexts.size();
 		}
-		cl_command_queue queue() const {
-			return _queue.get();
+		cl_context context(int index) const {
+			return _deviceContexts[index].context.get();
 		}
-		cl_device_id device() const {
-			return _device;
+		cl_command_queue queue(int index) const {
+			return _deviceContexts[index].queue.get();
+		}
+		cl_device_id device(int index) const {
+			return _deviceContexts[index].device_id;
+		}
+		PlatformInfo platform_info(int index) const {
+			return _deviceContexts[index].platform_info;
+		}
+		DeviceInfo device_info(int index) const {
+			return _deviceContexts[index].device_info;
 		}
 
-		PlatformInfo platform_info() const {
-			return _platform_info;
-		}
-		std::string device_name() const {
-			return _device_name;
-		}
-
-		template <class T>
-		std::shared_ptr<OpenCLBuffer<T>> createBuffer(T *value, uint32_t length) {
-			return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(_context.get(), _queue.get(), value, length));
-		}
+		//template <class T>
+		//std::shared_ptr<OpenCLBuffer<T>> createBuffer(T *value, uint32_t length) {
+		//	return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(_context.get(), _queue.get(), value, length));
+		//}
 	private:
-		cl_platform_id _platform = nullptr;
-		PlatformInfo _platform_info;
-
-		cl_device_id _device = nullptr;
-		std::string _device_name;
-
-		std::shared_ptr<std::remove_pointer<cl_context>::type> _context;
-		std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
+		struct DeviceContext {
+			PlatformInfo platform_info;
+			DeviceInfo device_info;
+			cl_device_id device_id = nullptr;
+			std::shared_ptr<std::remove_pointer<cl_context>::type> context;
+			std::shared_ptr<std::remove_pointer<cl_command_queue>::type> queue;
+		};
+		std::vector<DeviceContext> _deviceContexts;
 	};
 
 	inline cl_int opencl_build_log(std::string &log, cl_program program, cl_device_id device) {
@@ -263,13 +279,13 @@ namespace rt {
 	private:
 		std::vector<std::string> _includes;
 	};
+
 	class OpenCLKernel {
 	public:
-		OpenCLKernel(const char *kernel_source, OpenCLBuildOptions options, const char *platfrom_name) {
-			_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(platfrom_name));
-			construct(kernel_source, options);
-		}
-		OpenCLKernel(const char *kernel_source, OpenCLBuildOptions options, std::shared_ptr<OpenCLContext> context) :_context(context) {
+		OpenCLKernel(const char *kernel_source, OpenCLBuildOptions options, std::shared_ptr<OpenCLContext> context, int device_index) 
+			: _context(context) 
+			, _device_index(device_index)
+		{
 			construct(kernel_source, options);
 		}
 
@@ -296,66 +312,31 @@ namespace rt {
 			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(memory_object), &memory_object);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
-		std::shared_ptr<OpenCLEvent> launch(uint32_t offset, uint32_t length) {
-			size_t global_work_offset[] = { offset };
-			size_t global_work_size[] = { length };
-			cl_event kernel_event;
-			cl_int status = clEnqueueNDRangeKernel(
-				_context->queue(), 
-				_kernel.get(), 1 /*dim*/,
-				global_work_offset /*global_work_offset*/, 
-				global_work_size /*global_work_size*/, 
-				nullptr /*local_work_size*/,
-				0, nullptr, &kernel_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
-			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
-		}
-		// return kernel execution time miliseconds
-		//double launch_and_wait(uint32_t offset, uint32_t length) {
-		//	REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
 
-		//	cl_event kernel_event = 0;
+		//std::shared_ptr<OpenCLEvent> launch(uint32_t offset, uint32_t length) {
 		//	size_t global_work_offset[] = { offset };
 		//	size_t global_work_size[] = { length };
-		//	cl_int status = clEnqueueNDRangeKernel(_context->queue(), _kernel.get(), 1 /*dim*/, global_work_offset /*global_work_offset*/, global_work_size /*global_work_size*/, nullptr /*local_work_size*/, 0, nullptr, &kernel_event);
+		//	cl_event kernel_event;
+		//	cl_int status = clEnqueueNDRangeKernel(
+		//		_context->queue(), 
+		//		_kernel.get(), 1 /*dim*/,
+		//		global_work_offset /*global_work_offset*/, 
+		//		global_work_size /*global_work_size*/, 
+		//		nullptr /*local_work_size*/,
+		//		0, nullptr, &kernel_event);
 		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
-
-		//	// Time Profile
-		//	status = clWaitForEvents(1, &kernel_event);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
-
-		//	cl_ulong ev_beg_time_nano = 0;
-		//	cl_ulong ev_end_time_nano = 0;
-
-		//	status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &ev_beg_time_nano, NULL);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
-
-		//	status = clGetEventProfilingInfo(kernel_event, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
-
-		//	status = clReleaseEvent(kernel_event);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clReleaseEvent() failed");
-
-		//	cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
-		//	double delta_ms = delta_time_nano * 0.001 * 0.001;
-		//	return delta_ms;
+		//	return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
 		//}
+
 		std::shared_ptr<OpenCLContext> context() {
 			return _context;
 		}
 	private:
 		void construct(const char *kernel_source, OpenCLBuildOptions options) {
-			// std::stringstream option_stream;
-			// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clBuildProgram.html
-			// option_stream << "-I " << ofToDataPath("", true);
-			// option_stream << " ";
-			// option_stream << "-cl-denorms-are-zero";
-			// std::string options = option_stream.str();
-
 			const char *program_sources[] = { kernel_source };
 
 			cl_int status;
-			cl_program program = clCreateProgramWithSource(_context->context(), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
+			cl_program program = clCreateProgramWithSource(_context->context(_device_index), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateProgramWithSource() failed");
 			REQUIRE_OR_EXCEPTION(program, "clCreateProgramWithSource() failed");
 
@@ -364,7 +345,7 @@ namespace rt {
 			status = clBuildProgram(program, 0, nullptr, options.option().c_str(), NULL, NULL);
 			if (status == CL_BUILD_PROGRAM_FAILURE) {
 				std::string build_log;
-				status = opencl_build_log(build_log, program, _context->device());
+				status = opencl_build_log(build_log, program, _context->device(_device_index));
 				printf("%s", build_log.c_str());
 				REQUIRE_OR_EXCEPTION(false, build_log.c_str());
 			}
@@ -373,6 +354,7 @@ namespace rt {
 			}
 		}
 	private:
+		int _device_index = 0;
 		std::shared_ptr<OpenCLContext> _context;
 		std::shared_ptr<std::remove_pointer<cl_program>::type> _program;
 		std::shared_ptr<std::remove_pointer<cl_kernel>::type> _kernel;

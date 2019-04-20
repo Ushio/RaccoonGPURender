@@ -11,7 +11,7 @@ void ofApp::setup() {
 	_camera.setDistance(5.0f);
 
 	using namespace rt;
-	auto contet = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+	auto contet = std::shared_ptr<OpenCLContext>(new OpenCLContext());
 
 }
 void ofApp::exit() {

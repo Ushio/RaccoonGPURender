@@ -5,38 +5,25 @@
 #include "peseudo_random.hpp"
 
 namespace rt {
-	inline glm::dvec3 sample_on_unit_sphere(PeseudoRandom *random) {
-		double x1;
-		double x2;
-		double S;
-		do {
-			x1 = random->uniform(-1.0, 1.0);
-			x2 = random->uniform(-1.0, 1.0);
-			S = x1 * x1 + x2 * x2;
-		} while (S >= 1.0);
-
-		double two_sqrt_one_minus_s = 2.0 * std::sqrt(std::max(1.0 - S, 0.0));
-		return glm::dvec3(
-			x1 * two_sqrt_one_minus_s,
-			x2 * two_sqrt_one_minus_s,
-			1.0 - 2.0 * S);
+	// z up but it is not important.
+	template <class Real>
+	inline glm::tvec3<Real> sample_on_unit_sphere(Real u0, Real u1) {
+		Real phi = u0 * glm::two_pi<Real>();
+		Real z = glm::mix(Real(-1.0), Real(+1.0), u1);
+		Real r_xy = std::sqrt(std::max(Real(1.0) - z * z, Real(0.0)));
+		Real x = r_xy * std::cos(phi);
+		Real y = r_xy * std::sin(phi);
+		return glm::tvec3<Real>(x, y, z);
 	}
 
 	// z up
-	inline glm::dvec3 sample_on_unit_hemisphere(PeseudoRandom *random) {
-		double x1;
-		double x2;
-		double S;
-		do {
-			x1 = random->uniform(-1.0, 1.0);
-			x2 = random->uniform(-1.0, 1.0);
-			S = x1 * x1 + x2 * x2;
-		} while (S >= 1.0);
-
-		double c = std::sqrt(2.0 - S);
-		return glm::dvec3(
-			x1 * c,
-			x2 * c,
-			1.0 - S);
+	template <class Real>
+	inline glm::tvec3<Real> sample_on_unit_hemisphere(Real u0, Real u1) {
+		Real phi = u0 * glm::two_pi<Real>();
+		Real z = u1;
+		Real r_xy = std::sqrt(std::max(Real(1.0) - z * z, Real(0.0)));
+		Real x = r_xy * std::cos(phi);
+		Real y = r_xy * std::sin(phi);
+		return glm::tvec3<Real>(x, y, z);
 	}
 }

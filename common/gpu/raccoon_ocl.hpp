@@ -10,7 +10,8 @@
 namespace rt {
 	static const char *kPLATFORM_NAME_NVIDIA = u8"NVIDIA CUDA";
 	static const char *kPLATFORM_NAME_INTEL = u8"Intel(R) OpenCL";
-
+	static const char *kPLATFORM_NAME_AMD = u8"AMD Accelerated Parallel Processing";
+	
 	inline cl_int opencl_platform_info(std::string &info_string, cl_platform_id platform_id, cl_platform_info info) {
 		size_t length;
 		cl_int status = clGetPlatformInfo(platform_id, info, 0, nullptr, &length);

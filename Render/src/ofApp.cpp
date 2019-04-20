@@ -131,7 +131,8 @@ namespace rt {
 			buildBVH();
 
 			try {
-				_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+				//_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_NVIDIA));
+				_context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_AMD));
 				// _context = std::shared_ptr<OpenCLContext>(new OpenCLContext(kPLATFORM_NAME_INTEL));
 				std::string kernel_src = ofBufferFromFile("PathTracingWavefront.cl").getText();
 				OpenCLBuildOptions options;

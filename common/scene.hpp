@@ -4,90 +4,83 @@
 #include "assertion.hpp"
 #include "plane_equation.hpp"
 #include "triangle_util.hpp"
+#include "image2d.hpp"
+#include "envmap.hpp"
 
 namespace rt {
-	class MaterialDeclaration {
-	public:
-		virtual ~MaterialDeclaration() {}
-		virtual const char *name() const = 0;
-		virtual std::unique_ptr<BxDF> instanciate(const houdini_alembic::PolygonMeshObject *p, uint32_t primitive_index, const glm::dmat3 &xformInverseTransposed) const = 0;
-	};
-	class LambertianDeclaration : public MaterialDeclaration {
-	public:
-		const char *name() const override {
-			return "Lambertian";
-		}
-		std::unique_ptr<BxDF> instanciate(const houdini_alembic::PolygonMeshObject *p, uint32_t primitive_index, const glm::dmat3 &xformInverseTransposed) const override {
-			std::unique_ptr<LambertianBRDF> bxdf(new LambertianBRDF());
-			if (auto Cd = p->primitives.column_as_vector3("Cd")) {
-				Cd->get(primitive_index, glm::value_ptr(bxdf->R));
-			}
-			if (auto Le = p->primitives.column_as_vector3("Le")) {
-				Le->get(primitive_index, glm::value_ptr(bxdf->Le));
-			}
-			if (auto backEmission = p->primitives.column_as_int("back_emission")) {
-				bxdf->backEmission = backEmission->get(primitive_index) != 0;
-			}
-
-			if (auto Nv = p->vertices.column_as_vector3("N")) {
-				uint32_t index_src = primitive_index * 3;
-				for (int i = 0; i < 3; ++i) {
-					Nv->get(index_src + i, glm::value_ptr(bxdf->Nv[i]));
-					bxdf->Nv[i] = xformInverseTransposed * bxdf->Nv[i];
-				}
-			}
-			if (auto shadingNormal = p->primitives.column_as_int("shading_normal")) {
-				bxdf->shadingNormal = shadingNormal->get(primitive_index) != 0;
-			}
-			return bxdf;
-		}
-	};
-	class WardDeclaration : public MaterialDeclaration {
-	public:
-		const char *name() const override {
-			return "Ward";
-		}
-		std::unique_ptr<BxDF> instanciate(const houdini_alembic::PolygonMeshObject *p, uint32_t primitive_index, const glm::dmat3 &xformInverseTransposed) const override {
-			std::unique_ptr<WardBRDF> bxdf(new WardBRDF());
-			if (auto tangentu = p->primitives.column_as_vector3("tangentu")) {
-				tangentu->get(primitive_index, glm::value_ptr(bxdf->tangentu));
-			}
-			if (auto tangentv = p->primitives.column_as_vector3("tangentv")) {
-				tangentv->get(primitive_index, glm::value_ptr(bxdf->tangentv));
-			}
-			return bxdf;
-		}
-	};
-	static std::vector<MaterialDeclaration *> MaterialDeclarations = {
-		new LambertianDeclaration(),
-		new WardDeclaration(),
-	};
-	
-	inline std::vector<std::unique_ptr<BxDF>> instanciateMaterials(houdini_alembic::PolygonMeshObject *p, const glm::dmat3 &xformInverseTransposed) {
+	inline std::vector<std::unique_ptr<BxDF>> instanciateMaterials(houdini_alembic::PolygonMeshObject *p, const glm::mat3 &xformInverseTransposed) {
 		std::vector<std::unique_ptr<BxDF>> materials;
 
+		auto default_material = []() {
+			return std::unique_ptr<BxDF>(new LambertianBRDF(glm::vec3(), glm::vec3(0.9f, 0.1f, 0.9f), false));
+		};
+
 		auto material_string = p->primitives.column_as_string("material");
+		if (material_string == nullptr) {
+			for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
+				materials.emplace_back(default_material());
+			}
+			return materials;
+		}
 
 		materials.reserve(p->primitives.rowCount());
 		for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
-			std::unique_ptr<BxDF> mat;
+			const std::string m = material_string->get(i);
 
-			if (material_string) {
-				const std::string m = material_string->get(i);
-				for (int j = 0; j < MaterialDeclarations.size(); ++j) {
-					if (m == MaterialDeclarations[j]->name()) {
-						mat = MaterialDeclarations[j]->instanciate(p, i, xformInverseTransposed);
-						break;
+			using namespace rttr;
+			type t = type::get_by_name(m);
+			if (t.is_valid() == false) {
+				materials.emplace_back(default_material());
+				continue;
+			}
+
+			variant instance = t.create();
+			for (auto& prop : t.get_properties()) {
+				auto meta = prop.get_metadata(kGeoScopeKey);
+				RT_ASSERT(meta.is_valid());
+
+				GeoScope scope = meta.get_value<GeoScope>();
+				auto value = prop.get_value(instance);
+					
+				switch (scope)
+				{
+				case rt::GeoScope::Vertices:
+					if (value.is_type<std::array<glm::vec3, 3>>()) {
+						if (auto v = p->vertices.column_as_vector3(prop.get_name().data())) {
+							std::array<glm::vec3, 3> value;
+							for (int j = 0; j < value.size(); ++j) {
+								v->get(i * 3 + j, glm::value_ptr(value[j]));
+							}
+							prop.set_value(instance, value);
+						}
 					}
+
+					break;
+				case rt::GeoScope::Primitives:
+					if (value.is_type<glm::vec3>()) {
+						if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
+							glm::vec3 value;
+							v->get(i, glm::value_ptr(value));
+							prop.set_value(instance, value);
+						}
+					}
+					else if (value.is_type<int>()) {
+						if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
+							prop.set_value(instance, v->get(i));
+						}
+					}
+					else if (value.is_type<float>()) {
+						if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
+							prop.set_value(instance, v->get(i));
+						}
+					}
+					break;
 				}
 			}
-
-			// Error Material
-			if (!mat) {
-				mat = std::make_unique<LambertianBRDF>(glm::dvec3(), glm::dvec3(0.9, 0.1, 0.9), false);
-			}
-
-			materials.emplace_back(std::move(mat));
+			auto method = t.get_method("allocate");
+			RT_ASSERT(method.is_valid());
+			BxDF *bxdf = method.invoke(instance).get_value<BxDF *>();
+			materials.emplace_back(std::unique_ptr<BxDF>(bxdf));
 		}
 
 		return materials;
@@ -98,36 +91,25 @@ namespace rt {
 	}
 
 	struct Luminaire {
-		glm::dvec3 points[3];
-		glm::dvec3 Ng;
+		glm::vec3 points[3];
+		glm::vec3 Ng;
 		bool backenable = false;
-		PlaneEquation<double> plane;
-		double area = 0.0;
-		glm::dvec3 center;
-	};
-
-	class EnvironmentMap {
-	public:
-		virtual ~EnvironmentMap() {}
-		virtual glm::dvec3 radiance(const glm::dvec3 &wi) const = 0;
-	};
-
-	class ConstantEnvmap : public EnvironmentMap {
-	public:
-		virtual glm::dvec3 radiance(const glm::dvec3 &wi) const {
-			return constant;
-		}
-		glm::dvec3 constant;
+		PlaneEquation<float> plane;
+		float area = 0.0f;
+		glm::vec3 center;
 	};
 
 	class Scene {
 	public:
-		Scene(std::shared_ptr<houdini_alembic::AlembicScene> scene) : _scene(scene) {
+		Scene(std::shared_ptr<houdini_alembic::AlembicScene> scene, std::filesystem::path abcDirectory) : _scene(scene), _abcDirectory(abcDirectory) {
 			_embreeDevice = std::shared_ptr<RTCDeviceTy>(rtcNewDevice("set_affinity=1"), rtcReleaseDevice);
 			rtcSetDeviceErrorFunction(_embreeDevice.get(), EmbreeErorrHandler, nullptr);
 
 			_embreeScene = std::shared_ptr<RTCSceneTy>(rtcNewScene(_embreeDevice.get()), rtcReleaseScene);
 			rtcSetSceneBuildQuality(_embreeScene.get(), RTC_BUILD_QUALITY_HIGH);
+
+			// black envmap
+			_environmentMap = std::shared_ptr<ConstantEnvmap>(new ConstantEnvmap());
 			
 			for (auto o : scene->objects) {
 				if (o->visible == false) {
@@ -156,7 +138,7 @@ namespace rt {
 		Scene(const Scene &) = delete;
 		void operator=(const Scene &) = delete;
 
-		bool intersect(const glm::dvec3 &ro, const glm::dvec3 &rd, ShadingPoint *shadingPoint, float *tmin) const {
+		bool intersect(const glm::vec3 &ro, const glm::vec3 &rd, ShadingPoint *shadingPoint, float *tmin) const {
 			RTCRayHit rayhit;
 			rayhit.ray.org_x = ro.x;
 			rayhit.ray.org_y = ro.y;
@@ -201,12 +183,12 @@ namespace rt {
 			t_uv = (1-u-v)*t0 + u*t1 + v*t2
 			= t0 + u*(t1-t0) + v*(t2-t0)
 			*/
-			//double u = rayhit.hit.u;
-			//double v = rayhit.hit.v;
+			//float u = rayhit.hit.u;
+			//float v = rayhit.hit.v;
 			//auto v0 = geom.points[prim.indices[0]].P;
 			//auto v1 = geom.points[prim.indices[1]].P;
 			//auto v2 = geom.points[prim.indices[2]].P;
-			//(*material)->p = (1.0 - u - v) * v0 + u * v1 + v * v2;
+			//(*material)->p = (1.0f - u - v) * v0 + u * v1 + v * v2;
 
 			return true;
 		}
@@ -218,11 +200,8 @@ namespace rt {
 			return _luminaires;
 		}
 
-		glm::dvec3 environment_radiance(const glm::dvec3 &wi) const {
-			if (_environmentMap) {
-				return _environmentMap->radiance(wi);
-			}
-			return glm::dvec3();
+		EnvironmentMap *envmap() const {
+			return _environmentMap.get();
 		}
 	private:
 		class Polymesh {
@@ -238,12 +217,26 @@ namespace rt {
 				return;
 			}
 			for (int i = 0; i < point_type->rowCount(); ++i) {
-				if (point_type->get(i) == "constant_envmap") {
+				if (point_type->get(i) == "ConstantEnvmap") {
 					std::shared_ptr<ConstantEnvmap> env(new ConstantEnvmap());
 					if (auto r = p->points.column_as_vector3("radiance")) {
 						r->get(i, glm::value_ptr(env->constant));
 					}
 					_environmentMap = env;
+				}
+				else if (point_type->get(i) == "ImageEnvmap") {
+					if (auto r = p->points.column_as_string("file")) {
+						std::filesystem::path filePath(r->get(i));
+						filePath.make_preferred();
+
+						auto absFilePath = _abcDirectory / filePath;
+						
+						auto texture = std::shared_ptr<Image2D>(new Image2D());
+						texture->load(absFilePath.string().c_str());
+						texture->clamp_rgb(0.0f, 10000.0f);
+						_environmentMap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture));
+						// _environmentMap = std::shared_ptr<SixAxisImageEnvmap>(new SixAxisImageEnvmap(texture));
+					}
 				}
 			}
 		}
@@ -264,11 +257,11 @@ namespace rt {
 			for (int i = 0; i < 16; ++i) {
 				glm::value_ptr(xform)[i] = p->combinedXforms.value_ptr()[i];
 			}
-			glm::dmat3 xformInverseTransposed = glm::inverseTranspose(xform);
+			glm::mat3 xformInverseTransposed = glm::inverseTranspose(xform);
 
 			polymesh->points.reserve(p->P.size());
 			for (auto srcP : p->P) {
-				glm::vec3 p = xform * glm::dvec4(srcP.x, srcP.y, srcP.z, 1.0);
+				glm::vec3 p = xform * glm::vec4(srcP.x, srcP.y, srcP.z, 1.0f);
 				polymesh->points.emplace_back(p);
 			}
 
@@ -298,9 +291,9 @@ namespace rt {
 						L.Ng = triangle_normal_cw(L.points[0], L.points[1], L.points[2]);
 
 						L.plane.from_point_and_normal(L.points[0], L.Ng); 
-						L.center = (L.points[0] + L.points[1] + L.points[2]) / 3.0;
+						L.center = (L.points[0] + L.points[1] + L.points[2]) / 3.0f;
 						L.area = triangle_area(L.points[0], L.points[1], L.points[2]);
-						RT_ASSERT(0.0 < L.area);
+						RT_ASSERT(0.0f < L.area);
 
 						_luminaires.emplace_back(L);
 
@@ -336,6 +329,8 @@ namespace rt {
 		}
 	private:
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
+		std::filesystem::path _abcDirectory;
+
 		houdini_alembic::CameraObject *_camera = nullptr;
 		std::vector<std::unique_ptr<Polymesh>> _polymeshes;
 

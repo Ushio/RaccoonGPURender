@@ -5,15 +5,15 @@
   <PropertyGroup />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common;C:\Program Files\Intel\Embree3 x64\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common/gpu;$(ProjectDir)../common;$(EMBREE_ROOT)/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>C:\Program Files\Intel\Embree3 x64\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(EMBREE_ROOT)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>embree3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>robocopy "C:\Program Files\Intel\Embree3 x64\bin" $(TargetDir) embree3.dll
+      <Command>robocopy "$(EMBREE_ROOT)\bin" $(TargetDir) embree3.dll
 robocopy "$(VcpkgRoot)bin" $(TargetDir) tbb.dll
 for /d %%f in ("$(OF_ROOT)\libs\*") do (if exist "%%f\lib\vs\$(Platform_Actual)\*.dll" (robocopy "%%f\lib\vs\$(Platform_Actual)" "$(ProjectDir)bin" "*.dll" /njs /njh /np /fp /bytes ))
 if errorlevel 1 exit 0 else exit %errorlevel%</Command>

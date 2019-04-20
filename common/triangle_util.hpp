@@ -4,52 +4,55 @@
 #include <glm/ext.hpp>
 
 namespace rt {
-	inline glm::dvec3 triangle_normal_cw(const glm::dvec3 &v0, const glm::dvec3 &v1, const glm::dvec3 &v2) {
-		glm::dvec3 e1 = v1 - v0;
-		glm::dvec3 e2 = v2 - v0;
-		glm::dvec3 n_unnormalized = glm::cross(e2, e1);
-		double l = glm::length(n_unnormalized);
-		if(l < 1.0e-9) {
-			return glm::dvec3();
+	template <typename Real>
+	inline glm::tvec3<Real> triangle_normal_cw(const glm::tvec3<Real> &v0, const glm::tvec3<Real> &v1, const glm::tvec3<Real> &v2) {
+		auto e1 = v1 - v0;
+		auto e2 = v2 - v0;
+		auto n_unnormalized = glm::cross(e2, e1);
+		auto l = glm::length(n_unnormalized);
+		if(l < glm::epsilon<Real>() * Real(1.0e+4)) {
+			return glm::tvec3<Real>();
 		}
 		return n_unnormalized / l;
 	}
-	inline double triangle_area(const glm::dvec3 &p0, const glm::dvec3 &p1, const glm::dvec3 &p2) {
+	template <typename Real>
+	inline Real triangle_area(const glm::tvec3<Real> &p0, const glm::tvec3<Real> &p1, const glm::tvec3<Real> &p2) {
 		auto va = p0 - p1;
 		auto vb = p2 - p1;
-		return glm::length(glm::cross(va, vb)) * 0.5;
+		return glm::length(glm::cross(va, vb)) * Real(0.5);
 	}
 
-	inline bool intersect_ray_triangle(const glm::dvec3 &orig, const glm::dvec3 &dir, const glm::dvec3 &v0, const glm::dvec3 &v1, const glm::dvec3 &v2, double *tmin)
+	template <typename Real>
+	inline bool intersect_ray_triangle(const glm::tvec3<Real> &orig, const glm::tvec3<Real> &dir, const glm::tvec3<Real> &v0, const glm::tvec3<Real> &v1, const glm::tvec3<Real> &v2, Real *tmin)
 	{
-		const double kEpsilon = 1.0e-6;
+		const auto kEpsilon = glm::epsilon<Real>() * Real(1.0e+4);
 
-		glm::dvec3 v0v1 = v1 - v0;
-		glm::dvec3 v0v2 = v2 - v0;
-		glm::dvec3 pvec = glm::cross(dir, v0v2);
-		double det = glm::dot(v0v1, pvec);
+		auto v0v1 = v1 - v0;
+		auto v0v2 = v2 - v0;
+		auto pvec = glm::cross(dir, v0v2);
+		auto det = glm::dot(v0v1, pvec);
 
 		if (fabs(det) < kEpsilon) {
 			return false;
 		}
 
-		double invDet = 1.0 / det;
+		auto invDet = Real(1.0) / det;
 
-		glm::dvec3 tvec = orig - v0;
-		double u = glm::dot(tvec, pvec) * invDet;
-		if (u < 0.0 || u > 1.0) {
+		auto tvec = orig - v0;
+		auto u = glm::dot(tvec, pvec) * invDet;
+		if (u < Real(0.0) || u > Real(1.0)) {
 			return false;
 		}
 
-		glm::dvec3 qvec = glm::cross(tvec, v0v1);
-		double v = glm::dot(dir, qvec) * invDet;
-		if (v < 0.0 || u + v > 1.0) {
+		auto qvec = glm::cross(tvec, v0v1);
+		auto v = glm::dot(dir, qvec) * invDet;
+		if (v < Real(0.0) || u + v > Real(1.0)) {
 			return false;
 		}
 
-		double t = glm::dot(v0v2, qvec) * invDet;
+		auto t = glm::dot(v0v2, qvec) * invDet;
 
-		if (t < 0.0) {
+		if (t < Real(0.0)) {
 			return false;
 		}
 		*tmin = t;

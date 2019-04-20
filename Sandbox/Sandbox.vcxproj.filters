@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="src\ofApp.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\main.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_demo.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_draw.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_glfw.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl2.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl3.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_widgets.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{d8376475-7454-4a24-b08a-aac121d3ad6f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\ofxRaccoonImGui">
+      <UniqueIdentifier>{abc5a0fc-20d6-4942-b238-9b8a5eca6a0a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\ofApp.h">
+      <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_glfw.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl2.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl3.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_internal.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_rectpack.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_textedit.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_truetype.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.hpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imconfig.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="icon.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\libs\ofxRaccoonImGui\LICENSE.txt">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </Text>
+  </ItemGroup>
+</Project>

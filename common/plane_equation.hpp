@@ -21,7 +21,7 @@ namespace rt {
 		}
 
 		bool intersect_ray(const Vec3 &ro, const Vec3 &rd, Real *tmin) const {
-			Real eps = 1.0e-5f;
+			Real eps = Real(1.0e-5);
 			auto denom = glm::dot(n, rd);
 			if (std::fabs(denom) < eps) {
 				return false;

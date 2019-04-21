@@ -11,13 +11,13 @@ uint xoshiro128_star_star_next(uint4 *s) {
     const uint t = s->y << 9;
 
     s->z ^= s->x;
-    s->z ^= s->y;
+    s->w ^= s->y;
     s->y ^= s->z;
-    s->x ^= s->z;
+    s->x ^= s->w;
 
     s->z ^= t;
 
-    s->z = xoshiro_rotl(s->z, 11);
+    s->w = xoshiro_rotl(s->w, 11);
 
     return result_starstar;
 }
@@ -61,6 +61,18 @@ __kernel void random_initialize(__global uint4 *states, uint seed_offset) {
     }
 
     states[gid] = s;
+}
+
+__kernel void random_generate(__global uint4 *states, __global float4 *values) {
+    size_t gid = get_global_id(0);
+    uint4 s = states[gid];
+    float4 v;
+    v.x = random_uniform(&s);
+    v.y = random_uniform(&s);
+    v.z = random_uniform(&s);
+    v.w = random_uniform(&s);
+    states[gid] = s;
+    values[gid] = v;
 }
 
 #endif

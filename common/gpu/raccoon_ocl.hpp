@@ -241,15 +241,6 @@ namespace rt {
 			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			return _deviceContexts[index].device_info;
 		}
-
-		template <class T>
-		std::shared_ptr<OpenCLBuffer<T>> createBuffer(T *value, uint32_t length, int device_index) {
-			return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context(device_index), value, length));
-		}
-		template <class T>
-		std::shared_ptr<OpenCLBuffer<T>> createBuffer(uint32_t length, int device_index) {
-			return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context(device_index), length));
-		}
 	private:
 		struct DeviceContext {
 			PlatformInfo platform_info;

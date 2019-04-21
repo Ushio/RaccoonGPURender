@@ -13,22 +13,24 @@ void ofApp::setup() {
 
 	using namespace rt;
 
-	OpenCLKernelEnvioronment::instance().setSourceDirectory(ofToDataPath("../../../kernels"));
+	OpenCLProgramEnvioronment::instance().setSourceDirectory(ofToDataPath("../../../kernels"));
 
 	int n = 1000 * 1000;
 	OpenCLContext context;
 
-	for (int device_index = 0; device_index < context.deviceCount(); ++device_index) {
+	int deviceCount = context.deviceCount();
+	deviceCount = 2;
+	for (int device_index = 0; device_index < deviceCount; ++device_index) {
 		auto device_context = context.context(device_index);
 		auto queue = context.queue(device_index);
 		auto device = context.device(device_index);
 
-		int seed_offset = 100;
+		OpenCLProgram program("peseudo_random.cl", device_context, device);
 
+		int seed_offset = 100;
 		OpenCLBuffer<glm::uvec4> states_gpu(device_context, n);
 		{
-			OpenCLKernel kernel("peseudo_random.cl", device_context, device);
-			kernel.selectKernel("random_initialize");
+			OpenCLKernel kernel("random_initialize", program.program());
 			kernel.setArgument(0, states_gpu.memory());
 			kernel.setArgument(1, seed_offset);
 			kernel.launch(queue, 0, n);
@@ -44,26 +46,58 @@ void ofApp::setup() {
 
 		OpenCLBuffer<glm::vec4> values_gpu(device_context, n);
 		{
-			OpenCLKernel kernel("peseudo_random.cl", device_context, device);
-			kernel.selectKernel("random_generate");
+			OpenCLKernel kernel("random_generate", program.program());
 			kernel.setArgument(0, states_gpu.memory());
 			kernel.setArgument(1, values_gpu.memory());
-			kernel.launch(queue, 0, n);
+			auto e = kernel.launch(queue, 0, n);
+			auto gpu_time = e->wait();
+			printf("random_generate : %f\n", gpu_time);
 		}
-		std::vector<glm::vec4> values(n);
-		values_gpu.readImmediately(values.data(), queue);
 
-		for (int i = 0; i < n; ++i) {
-			Xoshiro128StarStar random(seed_offset + i);
-			float x = random.uniform();
-			float y = random.uniform();
-			float z = random.uniform();
-			float w = random.uniform();
-			RT_ASSERT(std::fabs(values[i].x - x) <= 1.0e-9f);
-			RT_ASSERT(std::fabs(values[i].y - y) <= 1.0e-9f);
-			RT_ASSERT(std::fabs(values[i].z - z) <= 1.0e-9f);
-			RT_ASSERT(std::fabs(values[i].w - w) <= 1.0e-9f);
+
+		// Queuing
+		{
+			OpenCLKernel kernel("random_generate", program.program());
+			kernel.setArgument(0, states_gpu.memory());
+			kernel.setArgument(1, values_gpu.memory());
+
+			std::queue<std::shared_ptr<OpenCLEvent>> eventQueue;
+			for (int i = 0; i < 10; ++i) {
+				eventQueue.push(kernel.launch(queue, 0, n));
+			}
+
+			for (int i = 0; i < 3 ; ++i) {
+				auto p = eventQueue.front();
+				eventQueue.pop();
+				p->wait();
+				eventQueue.push(kernel.launch(queue, 0, n));
+
+				//std::vector<glm::vec4> values(n);
+				//values_gpu.readImmediately(values.data(), queue);
+			}
+
+			while (!eventQueue.empty()) {
+				auto p = eventQueue.front();
+				eventQueue.pop();
+				p->wait();
+			}
+			//break;
 		}
+
+		//std::vector<glm::vec4> values(n);
+		//values_gpu.readImmediately(values.data(), queue);
+
+		//for (int i = 0; i < n; ++i) {
+		//	Xoshiro128StarStar random(seed_offset + i);
+		//	float x = random.uniform();
+		//	float y = random.uniform();
+		//	float z = random.uniform();
+		//	float w = random.uniform();
+		//	RT_ASSERT(std::fabs(values[i].x - x) <= 1.0e-9f);
+		//	RT_ASSERT(std::fabs(values[i].y - y) <= 1.0e-9f);
+		//	RT_ASSERT(std::fabs(values[i].z - z) <= 1.0e-9f);
+		//	RT_ASSERT(std::fabs(values[i].w - w) <= 1.0e-9f);
+		//}
 	}
 }
 void ofApp::exit() {

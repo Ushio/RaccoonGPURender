@@ -67,10 +67,12 @@ __kernel void random_generate(__global uint4 *states, __global float4 *values) {
     size_t gid = get_global_id(0);
     uint4 s = states[gid];
     float4 v;
-    v.x = random_uniform(&s);
-    v.y = random_uniform(&s);
-    v.z = random_uniform(&s);
-    v.w = random_uniform(&s);
+    for(int i = 0 ; i < 100000 ; ++i) {
+        v.x = random_uniform(&s);
+        v.y = random_uniform(&s);
+        v.z = random_uniform(&s);
+        v.w = random_uniform(&s);
+    }
     states[gid] = s;
     values[gid] = v;
 }

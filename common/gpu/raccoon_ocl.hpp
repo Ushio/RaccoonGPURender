@@ -50,8 +50,16 @@ namespace rt {
 	class OpenCLEvent {
 	public:
 		OpenCLEvent(cl_event e) :_event(e, clReleaseEvent) { }
+		~OpenCLEvent() {
+			if (_waited == false) {
+				wait();
+			}
+		}
+		OpenCLEvent(const OpenCLEvent&) = delete;
+		void operator=(const OpenCLEvent&) = delete;
 
 		double wait() {
+			_waited = true;
 			auto e = _event.get();
 			cl_int status = clWaitForEvents(1, &e);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
@@ -76,6 +84,7 @@ namespace rt {
 			return s;
 		}
 	private:
+		bool _waited = false;
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
 	};
 
@@ -291,10 +300,10 @@ namespace rt {
 		std::vector<std::string> _includes;
 	};
 
-	class OpenCLKernelEnvioronment {
+	class OpenCLProgramEnvioronment {
 	public:
-		static OpenCLKernelEnvioronment &instance() {
-			static OpenCLKernelEnvioronment i;
+		static OpenCLProgramEnvioronment &instance() {
+			static OpenCLProgramEnvioronment i;
 			return i;
 		}
 		void setSourceDirectory(std::string dir) {
@@ -314,22 +323,9 @@ namespace rt {
 
 	class OpenCLKernel {
 	public:
-		OpenCLKernel(const char *kernel_file, cl_context context, cl_device_id device_id) 
-			: _context(context)
-			, _device_id(device_id)
-		{
-			OpenCLKernelEnvioronment &env = OpenCLKernelEnvioronment::instance();
-			OpenCLBuildOptions options;
-			options.include(env.sourceDirectory());
-
-			std::ifstream ifs(env.kernelAbsolutePath(kernel_file));
-			std::string src = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
-			construct(src.c_str(), options);
-		}
-
-		void selectKernel(const char *kernel) {
+		OpenCLKernel(const char *kernel_function, cl_program program) {
 			cl_int status;
-			cl_kernel k = clCreateKernel(_program.get(), kernel, &status);
+			cl_kernel k = clCreateKernel(program, kernel_function, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateKernel() failed");
 			_kernel = decltype(_kernel)(k, clReleaseKernel);
 		}
@@ -342,29 +338,42 @@ namespace rt {
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
 
-		//template <class T>
-		//void setBufferArgument(int i, const OpenCLBuffer<T> &buffer) {
-		//	REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
-
-		//	auto memory_object = buffer.memory();
-		//	cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(memory_object), &memory_object);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
-		//}
-
 		std::shared_ptr<OpenCLEvent> launch(cl_command_queue queue, uint32_t offset, uint32_t length) {
 			size_t global_work_offset[] = { offset };
 			size_t global_work_size[] = { length };
 			cl_event kernel_event;
 			cl_int status = clEnqueueNDRangeKernel(
 				queue,
-				_kernel.get(), 
+				_kernel.get(),
 				1 /*dim*/,
-				global_work_offset/*global_work_offset*/, 
-				global_work_size  /*global_work_size*/, 
+				global_work_offset/*global_work_offset*/,
+				global_work_size  /*global_work_size*/,
 				nullptr           /*local_work_size*/,
 				0, nullptr, &kernel_event);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
+		}
+	private:
+		std::shared_ptr<std::remove_pointer<cl_kernel>::type> _kernel;
+	};
+
+	class OpenCLProgram {
+	public:
+		OpenCLProgram(const char *kernel_file, cl_context context, cl_device_id device_id)
+			: _context(context)
+			, _device_id(device_id)
+		{
+			OpenCLProgramEnvioronment &env = OpenCLProgramEnvioronment::instance();
+			OpenCLBuildOptions options;
+			options.include(env.sourceDirectory());
+
+			std::ifstream ifs(env.kernelAbsolutePath(kernel_file));
+			std::string src = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
+			construct(src.c_str(), options);
+		}
+
+		cl_program program() {
+			return _program.get();
 		}
 	private:
 		void construct(const char *kernel_source, OpenCLBuildOptions options) {
@@ -392,7 +401,7 @@ namespace rt {
 		cl_context _context;
 		cl_device_id _device_id;
 		std::shared_ptr<std::remove_pointer<cl_program>::type> _program;
-		std::shared_ptr<std::remove_pointer<cl_kernel>::type> _kernel;
+		
 	};
 }
 

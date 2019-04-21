@@ -4,12 +4,50 @@
 #include <vector>
 #include <map>
 #include <algorithm>
+#include <glm/glm.hpp>
 
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
 #include "assertion.hpp"
 
 namespace rt {
+	struct alignas(16) OpenCLFloat4 {
+		float x;
+		float y;
+		float z;
+		float w;
+
+		OpenCLFloat4() {}
+		OpenCLFloat4(const glm::vec3 &v)
+			: x(v.x)
+			, y(v.y)
+			, z(v.z) {
+		}
+		OpenCLFloat4(const glm::vec4& v)
+			: x(v.x)
+			, y(v.y)
+			, z(v.z)
+			, w(v.w) {
+		}
+		void operator=(const glm::vec3 &v) {
+			x = v.x;
+			y = v.y;
+			z = v.z;
+		}
+		void operator=(const glm::vec4 &v) {
+			x = v.x;
+			y = v.y;
+			z = v.z;
+			w = v.w;
+		}
+		glm::vec3 as_vec3() const {
+			return glm::vec3(x, y, z);
+		}
+		glm::vec4 as_vec4() const {
+			return glm::vec4(x, y, z, w);
+		}
+	};
+
 	static const char *kPLATFORM_NAME_NVIDIA = u8"NVIDIA CUDA";
 	static const char *kPLATFORM_NAME_INTEL = u8"Intel(R) OpenCL";
 	static const char *kPLATFORM_NAME_AMD = u8"AMD Accelerated Parallel Processing";
@@ -310,6 +348,11 @@ namespace rt {
 			_directory = std::filesystem::absolute(std::filesystem::path(dir));
 			_directory.make_preferred();
 		}
+		void addInclude(std::string dir) {
+			std::filesystem::path d = std::filesystem::absolute(std::filesystem::path(dir));
+			d.make_preferred();
+			_includes.push_back(d.string());
+		}
 		std::string sourceDirectory() const {
 			return _directory.string();
 		}
@@ -317,8 +360,12 @@ namespace rt {
 			auto absFilePath = _directory / kernel_file;
 			return std::filesystem::absolute(absFilePath).string();
 		}
+		std::vector<std::string> includes() const {
+			return _includes;
+		}
 	private:
 		std::filesystem::path _directory;
+		std::vector<std::string> _includes;
 	};
 
 	class OpenCLKernel {
@@ -365,7 +412,9 @@ namespace rt {
 		{
 			OpenCLProgramEnvioronment &env = OpenCLProgramEnvioronment::instance();
 			OpenCLBuildOptions options;
-			options.include(env.sourceDirectory());
+			for (auto d : env.includes()) {
+				options.include(d);
+			}
 
 			std::ifstream ifs(env.kernelAbsolutePath(kernel_file));
 			std::string src = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
@@ -401,7 +450,6 @@ namespace rt {
 		cl_context _context;
 		cl_device_id _device_id;
 		std::shared_ptr<std::remove_pointer<cl_program>::type> _program;
-		
 	};
 }
 

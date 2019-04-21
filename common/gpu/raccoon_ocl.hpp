@@ -82,9 +82,8 @@ namespace rt {
 	template <class T>
 	class OpenCLBuffer {
 	public:
-		OpenCLBuffer(cl_context context, cl_command_queue queue, T *value, uint32_t length)
+		OpenCLBuffer(cl_context context, T *value, uint32_t length)
 			: _context(context)
-			, _queue(queue)
 			, _length(length) {
 
 			cl_int status;
@@ -93,29 +92,41 @@ namespace rt {
 			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 		}
+		OpenCLBuffer(cl_context context, uint32_t length)
+			: _context(context)
+			, _length(length) {
+
+			cl_int status;
+			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE, length * sizeof(T), nullptr, &status);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
+			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
+			_memory = decltype(_memory)(memory, clReleaseMemObject);
+		}
 		cl_mem memory() const {
 			return _memory.get();
 		}
 
-		std::shared_ptr<OpenCLEvent> map(T **value) {
+		std::shared_ptr<OpenCLEvent> map(T **value, cl_command_queue queue) {
 			cl_event read_event;
 			cl_int status;
-			(*value) = (T *)clEnqueueMapBuffer(_queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &read_event, &status);
+			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &read_event, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(read_event));
 		}
-		void unmap(T *value) {
-			cl_int status = clEnqueueUnmapMemObject(_queue, _memory.get(), value, 0, nullptr, nullptr);
+		void unmap(T *value, cl_command_queue queue) {
+			cl_int status = clEnqueueUnmapMemObject(queue, _memory.get(), value, 0, nullptr, nullptr);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
 		}
-		void blocking_read(T *value) {
-			cl_int status = clEnqueueReadBuffer(_queue, _memory.get(), CL_TRUE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+
+		void readImmediately(T *value, cl_command_queue queue) {
+			T *p_gpu;
+			auto map_event = map(&p_gpu, queue);
+			map_event->wait();
+			std::copy(p_gpu, p_gpu + _length, value);
+			unmap(p_gpu, queue);
 		}
 	private:
 		cl_context _context;
-		cl_command_queue _queue;
-
 		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
 		uint32_t _length = 0;
 	};
@@ -211,25 +222,34 @@ namespace rt {
 			return _deviceContexts.size();
 		}
 		cl_context context(int index) const {
+			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			return _deviceContexts[index].context.get();
 		}
 		cl_command_queue queue(int index) const {
+			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			return _deviceContexts[index].queue.get();
 		}
 		cl_device_id device(int index) const {
+			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			return _deviceContexts[index].device_id;
 		}
 		PlatformInfo platform_info(int index) const {
+			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			return _deviceContexts[index].platform_info;
 		}
 		DeviceInfo device_info(int index) const {
+			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			return _deviceContexts[index].device_info;
 		}
 
-		//template <class T>
-		//std::shared_ptr<OpenCLBuffer<T>> createBuffer(T *value, uint32_t length) {
-		//	return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(_context.get(), _queue.get(), value, length));
-		//}
+		template <class T>
+		std::shared_ptr<OpenCLBuffer<T>> createBuffer(T *value, uint32_t length, int device_index) {
+			return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context(device_index), value, length));
+		}
+		template <class T>
+		std::shared_ptr<OpenCLBuffer<T>> createBuffer(uint32_t length, int device_index) {
+			return std::shared_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context(device_index), length));
+		}
 	private:
 		struct DeviceContext {
 			PlatformInfo platform_info;
@@ -280,13 +300,40 @@ namespace rt {
 		std::vector<std::string> _includes;
 	};
 
+	class OpenCLKernelEnvioronment {
+	public:
+		static OpenCLKernelEnvioronment &instance() {
+			static OpenCLKernelEnvioronment i;
+			return i;
+		}
+		void setSourceDirectory(std::string dir) {
+			_directory = std::filesystem::absolute(std::filesystem::path(dir));
+			_directory.make_preferred();
+		}
+		std::string sourceDirectory() const {
+			return _directory.string();
+		}
+		std::string kernelAbsolutePath(const char *kernel_file) const {
+			auto absFilePath = _directory / kernel_file;
+			return std::filesystem::absolute(absFilePath).string();
+		}
+	private:
+		std::filesystem::path _directory;
+	};
+
 	class OpenCLKernel {
 	public:
-		OpenCLKernel(const char *kernel_source, OpenCLBuildOptions options, std::shared_ptr<OpenCLContext> context, int device_index) 
-			: _context(context) 
-			, _device_index(device_index)
+		OpenCLKernel(const char *kernel_file, cl_context context, cl_device_id device_id) 
+			: _context(context)
+			, _device_id(device_id)
 		{
-			construct(kernel_source, options);
+			OpenCLKernelEnvioronment &env = OpenCLKernelEnvioronment::instance();
+			OpenCLBuildOptions options;
+			options.include(env.sourceDirectory());
+
+			std::ifstream ifs(env.kernelAbsolutePath(kernel_file));
+			std::string src = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
+			construct(src.c_str(), options);
 		}
 
 		void selectKernel(const char *kernel) {
@@ -297,46 +344,43 @@ namespace rt {
 		}
 
 		template <class T>
-		void setValueArgument(int i, T value) {
+		void setArgument(int i, T value) {
 			REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
 
 			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(value), &value);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
 
-		template <class T>
-		void setGlobalArgument(int i, const OpenCLBuffer<T> &buffer) {
-			REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
+		//template <class T>
+		//void setBufferArgument(int i, const OpenCLBuffer<T> &buffer) {
+		//	REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
 
-			auto memory_object = buffer.memory();
-			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(memory_object), &memory_object);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
-		}
-
-		//std::shared_ptr<OpenCLEvent> launch(uint32_t offset, uint32_t length) {
-		//	size_t global_work_offset[] = { offset };
-		//	size_t global_work_size[] = { length };
-		//	cl_event kernel_event;
-		//	cl_int status = clEnqueueNDRangeKernel(
-		//		_context->queue(), 
-		//		_kernel.get(), 1 /*dim*/,
-		//		global_work_offset /*global_work_offset*/, 
-		//		global_work_size /*global_work_size*/, 
-		//		nullptr /*local_work_size*/,
-		//		0, nullptr, &kernel_event);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
-		//	return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
+		//	auto memory_object = buffer.memory();
+		//	cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(memory_object), &memory_object);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		//}
 
-		std::shared_ptr<OpenCLContext> context() {
-			return _context;
+		std::shared_ptr<OpenCLEvent> launch(cl_command_queue queue, uint32_t offset, uint32_t length) {
+			size_t global_work_offset[] = { offset };
+			size_t global_work_size[] = { length };
+			cl_event kernel_event;
+			cl_int status = clEnqueueNDRangeKernel(
+				queue,
+				_kernel.get(), 
+				1 /*dim*/,
+				global_work_offset/*global_work_offset*/, 
+				global_work_size  /*global_work_size*/, 
+				nullptr           /*local_work_size*/,
+				0, nullptr, &kernel_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
 		}
 	private:
 		void construct(const char *kernel_source, OpenCLBuildOptions options) {
 			const char *program_sources[] = { kernel_source };
 
 			cl_int status;
-			cl_program program = clCreateProgramWithSource(_context->context(_device_index), sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
+			cl_program program = clCreateProgramWithSource(_context, sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateProgramWithSource() failed");
 			REQUIRE_OR_EXCEPTION(program, "clCreateProgramWithSource() failed");
 
@@ -345,7 +389,7 @@ namespace rt {
 			status = clBuildProgram(program, 0, nullptr, options.option().c_str(), NULL, NULL);
 			if (status == CL_BUILD_PROGRAM_FAILURE) {
 				std::string build_log;
-				status = opencl_build_log(build_log, program, _context->device(_device_index));
+				status = opencl_build_log(build_log, program, _device_id);
 				printf("%s", build_log.c_str());
 				REQUIRE_OR_EXCEPTION(false, build_log.c_str());
 			}
@@ -354,8 +398,8 @@ namespace rt {
 			}
 		}
 	private:
-		int _device_index = 0;
-		std::shared_ptr<OpenCLContext> _context;
+		cl_context _context;
+		cl_device_id _device_id;
 		std::shared_ptr<std::remove_pointer<cl_program>::type> _program;
 		std::shared_ptr<std::remove_pointer<cl_kernel>::type> _kernel;
 	};

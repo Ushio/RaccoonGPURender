@@ -29,7 +29,7 @@ namespace rt {
 
 	// http://xoshiro.di.unimi.it/splitmix64.c
 	// for generate seed
-	struct splitmix {
+	struct splitmix64 {
 		uint64_t x = 0; /* The state can be seeded with any value. */
 		uint64_t next() {
 			uint64_t z = (x += 0x9e3779b97f4a7c15);
@@ -44,17 +44,31 @@ namespace rt {
 	*/
 	struct Xoshiro128StarStar : public PeseudoRandom {
 		Xoshiro128StarStar() {
-			splitmix sp;
+			splitmix64 sp;
 			sp.x = 38927482;
-			for (int i = 0; i < 4; ++i) {
-				s[i] = std::max((uint32_t)sp.next(), 1u);
+			uint64_t r0 = sp.next();
+			uint64_t r1 = sp.next();
+			s[0] = r0 & 0xFFFFFFFF;
+			s[1] = (r0 >> 32) & 0xFFFFFFFF;
+			s[2] = r1 & 0xFFFFFFFF;
+			s[3] = (r1 >> 32) & 0xFFFFFFFF;
+
+			if (state() == glm::uvec4(0, 0, 0, 0)) {
+				s[0] = 1;
 			}
 		}
 		Xoshiro128StarStar(uint32_t seed) {
-			splitmix sp;
+			splitmix64 sp;
 			sp.x = seed;
-			for (int i = 0; i < 4; ++i) {
-				s[i] = std::max((uint32_t)sp.next(), 1u);
+			uint64_t r0 = sp.next();
+			uint64_t r1 = sp.next();
+			s[0] = r0 & 0xFFFFFFFF;
+			s[1] = (r0 >> 32) & 0xFFFFFFFF;
+			s[2] = r1 & 0xFFFFFFFF;
+			s[3] = (r1 >> 32) & 0xFFFFFFFF;
+
+			if (state() == glm::uvec4(0, 0, 0, 0)) {
+				s[0] = 1;
 			}
 		}
 
@@ -97,6 +111,9 @@ namespace rt {
 			s[1] = s1;
 			s[2] = s2;
 			s[3] = s3;
+		}
+		glm::uvec4 state() const {
+			return glm::uvec4(s[0], s[1], s[2], s[3]);
 		}
 	private:
 		uint32_t rotl(const uint32_t x, int k) {

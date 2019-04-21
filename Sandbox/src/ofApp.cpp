@@ -1,6 +1,7 @@
 ﻿#include "ofApp.h"
 #include "ofxRaccoonImGui.hpp"
 #include "raccoon_ocl.hpp"
+#include "peseudo_random.hpp"
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -11,8 +12,26 @@ void ofApp::setup() {
 	_camera.setDistance(5.0f);
 
 	using namespace rt;
-	auto contet = std::shared_ptr<OpenCLContext>(new OpenCLContext());
 
+	OpenCLKernelEnvioronment::instance().setSourceDirectory(ofToDataPath("../../../kernels"));
+
+	int n = 1000 * 1000;
+	OpenCLContext context;
+	auto states_gpu = context.createBuffer<glm::uvec4>(n, 0);
+
+	OpenCLKernel kernel("peseudo_random.cl", context.context(0), context.device(0));
+	kernel.selectKernel("random_initialize");
+	kernel.setArgument(0, states_gpu->memory());
+	kernel.setArgument(1, 100);
+	kernel.launch(context.queue(0), 0, n);
+
+	std::vector<glm::uvec4> states(n);
+	states_gpu->readImmediately(states.data(), context.queue(0));
+
+	for (int i = 0; i < n; ++i) {
+		Xoshiro128StarStar random(100 + i);
+		RT_ASSERT(states[i] == random.state());
+	}
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();

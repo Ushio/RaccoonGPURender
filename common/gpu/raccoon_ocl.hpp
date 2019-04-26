@@ -344,6 +344,11 @@ namespace rt {
 			static OpenCLProgramEnvioronment i;
 			return i;
 		}
+		OpenCLProgramEnvioronment() {
+			// Nvidia Platformでは -I の状態まで見てカーネルキャッシュが実装されていないため、一旦無効化して対応
+			// https://stackoverflow.com/questions/31338520/opencl-clbuildprogram-caches-source-and-does-not-recompile-if-included-source
+			_putenv("CUDA_CACHE_DISABLE=1");
+		}
 		void setSourceDirectory(std::string dir) {
 			_directory = std::filesystem::absolute(std::filesystem::path(dir));
 			_directory.make_preferred();

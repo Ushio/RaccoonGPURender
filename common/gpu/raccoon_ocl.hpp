@@ -178,6 +178,13 @@ namespace rt {
 		uint32_t _length = 0;
 	};
 
+	class OpenCLLane {
+	public:
+		cl_device_id device_id = nullptr;
+		cl_context context = nullptr;
+		cl_command_queue queue = nullptr;
+	};
+
 	class OpenCLContext {
 	public:
 		struct PlatformInfo {
@@ -268,17 +275,13 @@ namespace rt {
 		int deviceCount() const {
 			return _deviceContexts.size();
 		}
-		cl_context context(int index) const {
+		OpenCLLane lane(int index) const {
 			RT_ASSERT(0 <= index && index < _deviceContexts.size());
-			return _deviceContexts[index].context.get();
-		}
-		cl_command_queue queue(int index) const {
-			RT_ASSERT(0 <= index && index < _deviceContexts.size());
-			return _deviceContexts[index].queue.get();
-		}
-		cl_device_id device(int index) const {
-			RT_ASSERT(0 <= index && index < _deviceContexts.size());
-			return _deviceContexts[index].device_id;
+			OpenCLLane lane;
+			lane.device_id = _deviceContexts[index].device_id;
+			lane.queue = _deviceContexts[index].queue.get();
+			lane.context = _deviceContexts[index].context.get();
+			return lane;
 		}
 		PlatformInfo platform_info(int index) const {
 			RT_ASSERT(0 <= index && index < _deviceContexts.size());

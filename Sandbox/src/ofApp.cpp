@@ -21,35 +21,33 @@ void ofApp::setup() {
 	int deviceCount = context.deviceCount();
 	deviceCount = 2;
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
-		auto device_context = context.context(device_index);
-		auto queue = context.queue(device_index);
-		auto device = context.device(device_index);
+		auto lane = context.lane(device_index);
 
-		OpenCLProgram program("peseudo_random.cl", device_context, device);
+		OpenCLProgram program("peseudo_random.cl", lane.context, lane.device_id);
 
 		int seed_offset = 100;
-		OpenCLBuffer<glm::uvec4> states_gpu(device_context, n);
+		OpenCLBuffer<glm::uvec4> states_gpu(lane.context, n);
 		{
 			OpenCLKernel kernel("random_initialize", program.program());
 			kernel.setArgument(0, states_gpu.memory());
 			kernel.setArgument(1, seed_offset);
-			kernel.launch(queue, 0, n);
+			kernel.launch(lane.queue, 0, n);
 		}
 
 		std::vector<glm::uvec4> states(n);
-		states_gpu.readImmediately(states.data(), queue);
+		states_gpu.readImmediately(states.data(), lane.queue);
 
 		for (int i = 0; i < n; ++i) {
 			Xoshiro128StarStar random(seed_offset + i);
 			RT_ASSERT(states[i] == random.state());
 		}
 
-		OpenCLBuffer<glm::vec4> values_gpu(device_context, n);
+		OpenCLBuffer<glm::vec4> values_gpu(lane.context, n);
 		{
 			OpenCLKernel kernel("random_generate", program.program());
 			kernel.setArgument(0, states_gpu.memory());
 			kernel.setArgument(1, values_gpu.memory());
-			auto e = kernel.launch(queue, 0, n);
+			auto e = kernel.launch(lane.queue, 0, n);
 			auto gpu_time = e->wait();
 			printf("random_generate : %f\n", gpu_time);
 		}
@@ -63,14 +61,14 @@ void ofApp::setup() {
 
 			std::queue<std::shared_ptr<OpenCLEvent>> eventQueue;
 			for (int i = 0; i < 10; ++i) {
-				eventQueue.push(kernel.launch(queue, 0, n));
+				eventQueue.push(kernel.launch(lane.queue, 0, n));
 			}
 
 			for (int i = 0; i < 3 ; ++i) {
 				auto p = eventQueue.front();
 				eventQueue.pop();
 				p->wait();
-				eventQueue.push(kernel.launch(queue, 0, n));
+				eventQueue.push(kernel.launch(lane.queue, 0, n));
 
 				//std::vector<glm::vec4> values(n);
 				//values_gpu.readImmediately(values.data(), queue);

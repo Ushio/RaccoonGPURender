@@ -8,12 +8,12 @@
 
 void run_unit_test() {
 	static Catch::Session session;
-	char* custom_argv[] = {
-		"",
-		"[Simple Queue]"
-	};
-	session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
-	//session.run();
+	//char* custom_argv[] = {
+	//	"",
+	//	"[Simple Queue]"
+	//};
+	//session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
+	session.run();
 }
 
 TEST_CASE("Atomic", "[Atomic]") {
@@ -28,24 +28,22 @@ TEST_CASE("Atomic", "[Atomic]") {
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
 		UNSCOPED_INFO("device name : " << context.device_info(device_index).name);
 
-		auto device_context = context.context(device_index);
-		auto queue = context.queue(device_index);
-		auto device = context.device(device_index);
+		auto lane = context.lane(device_index);
 
-		OpenCLProgram program("atomic_unit_test.cl", device_context, device);
+		OpenCLProgram program("atomic_unit_test.cl", lane.context, lane.device_id);
 		OpenCLKernel kernel("run", program.program());
 
 		const int N = 100000;
 		int32_t sum_i = 0;
 		float sum_f = 0;
-		OpenCLBuffer<int32_t> sum_i_gpu(device_context, &sum_i, 1);
-		OpenCLBuffer<float> sum_f_gpu(device_context, &sum_f, 1);
+		OpenCLBuffer<int32_t> sum_i_gpu(lane.context, &sum_i, 1);
+		OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
 		kernel.setArgument(0, sum_i_gpu.memory());
 		kernel.setArgument(1, sum_f_gpu.memory());
-		kernel.launch(queue, 0, N);
+		kernel.launch(lane.queue, 0, N);
 
-		sum_i_gpu.readImmediately(&sum_i, queue);
-		sum_f_gpu.readImmediately(&sum_f, queue);
+		sum_i_gpu.readImmediately(&sum_i, lane.queue);
+		sum_f_gpu.readImmediately(&sum_f, lane.queue);
 		REQUIRE(sum_i == N);
 		REQUIRE((int)sum_f == N);
 	}
@@ -63,27 +61,24 @@ TEST_CASE("Simple Queue", "[Simple Queue]") {
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
 		std::string device_name = context.device_info(device_index).name;
 		UNSCOPED_INFO("device name : " << device_name);
+		auto lane = context.lane(device_index);
 
-		auto device_context = context.context(device_index);
-		auto queue = context.queue(device_index);
-		auto device = context.device(device_index);
-
-		OpenCLProgram program("queue_unit_test.cl", device_context, device);
+		OpenCLProgram program("queue_unit_test.cl", lane.context, lane.device_id);
 		{
 			OpenCLKernel kernel("queue_simple", program.program());
 
 			const int N = 10000000;
 			uint32_t queue_next_index = 0;
-			OpenCLBuffer<uint32_t> queue_next_index_gpu(device_context, &queue_next_index, 1);
-			OpenCLBuffer<int32_t> queue_value_gpu(device_context, N);
+			OpenCLBuffer<uint32_t> queue_next_index_gpu(lane.context, &queue_next_index, 1);
+			OpenCLBuffer<int32_t> queue_value_gpu(lane.context, N);
 			kernel.setArgument(0, queue_next_index_gpu.memory());
 			kernel.setArgument(1, queue_value_gpu.memory());
-			auto kernel_event = kernel.launch(queue, 0, N);
+			auto kernel_event = kernel.launch(lane.queue, 0, N);
 			printf("[%s] queue_simple kernel %f ms\n", device_name.c_str(), kernel_event->wait());
 
 			std::vector<int32_t> queue_value(N);
-			queue_next_index_gpu.readImmediately(&queue_next_index, queue);
-			queue_value_gpu.readImmediately(queue_value.data(), queue);
+			queue_next_index_gpu.readImmediately(&queue_next_index, lane.queue);
+			queue_value_gpu.readImmediately(queue_value.data(), lane.queue);
 
 			int queue_count = queue_next_index;
 			for (int i = 0; i < queue_count; ++i) {
@@ -96,16 +91,16 @@ TEST_CASE("Simple Queue", "[Simple Queue]") {
 
 			const int N = 10000000;
 			uint32_t queue_next_index = 0;
-			OpenCLBuffer<uint32_t> queue_next_index_gpu(device_context, &queue_next_index, 1);
-			OpenCLBuffer<int32_t> queue_value_gpu(device_context, N);
+			OpenCLBuffer<uint32_t> queue_next_index_gpu(lane.context, &queue_next_index, 1);
+			OpenCLBuffer<int32_t> queue_value_gpu(lane.context, N);
 			kernel.setArgument(0, queue_next_index_gpu.memory());
 			kernel.setArgument(1, queue_value_gpu.memory());
-			auto kernel_event = kernel.launch(queue, 0, N);
+			auto kernel_event = kernel.launch(lane.queue, 0, N);
 			printf("[%s] queue_use_local kernel %f ms\n", device_name.c_str(), kernel_event->wait());
 
 			std::vector<int32_t> queue_value(N);
-			queue_next_index_gpu.readImmediately(&queue_next_index, queue);
-			queue_value_gpu.readImmediately(queue_value.data(), queue);
+			queue_next_index_gpu.readImmediately(&queue_next_index, lane.queue);
+			queue_value_gpu.readImmediately(queue_value.data(), lane.queue);
 
 			int queue_count = queue_next_index;
 			for (int i = 0; i < queue_count; ++i) {
@@ -215,18 +210,16 @@ TEST_CASE("AABB", "[AABB]") {
 			for (int device_index = 0; device_index < deviceCount; ++device_index) {
 				UNSCOPED_INFO("device name : " << context.device_info(device_index).name);
 
-				auto device_context = context.context(device_index);
-				auto queue = context.queue(device_index);
-				auto device = context.device(device_index);
+				auto lane = context.lane(device_index);
 
-				OpenCLProgram program("aabb_unit_test.cl", device_context, device);
+				OpenCLProgram program("aabb_unit_test.cl", lane.context, lane.device_id);
 				OpenCLKernel kernel("run", program.program());
 
-				OpenCLBuffer<OpenCLFloat4> ros_gpu(device_context, ros.data(), ros.size());
-				OpenCLBuffer<OpenCLFloat4> rds_gpu(device_context, rds.data(), rds.size());
-				OpenCLBuffer<float> tmins_gpu(device_context, tmins.data(), tmins.size());
-				OpenCLBuffer<int32_t> insides_gpu(device_context, insides.data(), insides.size());
-				OpenCLBuffer<int32_t> results_gpu(device_context, ros.size());
+				OpenCLBuffer<OpenCLFloat4> ros_gpu(lane.context, ros.data(), ros.size());
+				OpenCLBuffer<OpenCLFloat4> rds_gpu(lane.context, rds.data(), rds.size());
+				OpenCLBuffer<float> tmins_gpu(lane.context, tmins.data(), tmins.size());
+				OpenCLBuffer<int32_t> insides_gpu(lane.context, insides.data(), insides.size());
+				OpenCLBuffer<int32_t> results_gpu(lane.context, ros.size());
 
 				kernel.setArgument(0, ros_gpu.memory());
 				kernel.setArgument(1, rds_gpu.memory());
@@ -235,10 +228,10 @@ TEST_CASE("AABB", "[AABB]") {
 				kernel.setArgument(4, results_gpu.memory());
 				kernel.setArgument(5, OpenCLFloat4(p0));
 				kernel.setArgument(6, OpenCLFloat4(p1));
-				kernel.launch(queue, 0, ros.size());
+				kernel.launch(lane.queue, 0, ros.size());
 
 				std::vector<int32_t> results(ros.size());
-				results_gpu.readImmediately(results.data(), queue);
+				results_gpu.readImmediately(results.data(), lane.queue);
 
 				for (int i = 0; i < results.size(); ++i) {
 					REQUIRE(results[i] == 1);

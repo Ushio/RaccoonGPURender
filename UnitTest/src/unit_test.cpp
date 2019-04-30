@@ -8,12 +8,16 @@
 
 void run_unit_test() {
 	static Catch::Session session;
-	//char* custom_argv[] = {
-	//	"",
-	//	"[Simple Queue]"
-	//};
-	//session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
-	session.run();
+	char* custom_argv[] = {
+		"",
+		"--break", /* enable break */
+		"--durations",
+		"yes",
+		"--use-colour",
+		"auto",
+		"",
+	};
+	session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
 }
 
 TEST_CASE("Atomic", "[Atomic]") {
@@ -26,7 +30,7 @@ TEST_CASE("Atomic", "[Atomic]") {
 
 	int deviceCount = context.deviceCount();
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
-		UNSCOPED_INFO("device name : " << context.device_info(device_index).name);
+		INFO("device name : " << context.device_info(device_index).name);
 
 		auto lane = context.lane(device_index);
 
@@ -60,7 +64,7 @@ TEST_CASE("Simple Queue", "[Simple Queue]") {
 	int deviceCount = context.deviceCount();
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
 		std::string device_name = context.device_info(device_index).name;
-		UNSCOPED_INFO("device name : " << device_name);
+		INFO("device name : " << device_name);
 		auto lane = context.lane(device_index);
 
 		OpenCLProgram program("queue_unit_test.cl", lane.context, lane.device_id);
@@ -74,7 +78,7 @@ TEST_CASE("Simple Queue", "[Simple Queue]") {
 			kernel.setArgument(0, queue_next_index_gpu.memory());
 			kernel.setArgument(1, queue_value_gpu.memory());
 			auto kernel_event = kernel.launch(lane.queue, 0, N);
-			printf("[%s] queue_simple kernel %f ms\n", device_name.c_str(), kernel_event->wait());
+			// printf("[%s] queue_simple kernel %f ms\n", device_name.c_str(), kernel_event->wait());
 
 			std::vector<int32_t> queue_value(N);
 			queue_next_index_gpu.readImmediately(&queue_next_index, lane.queue);
@@ -96,7 +100,7 @@ TEST_CASE("Simple Queue", "[Simple Queue]") {
 			kernel.setArgument(0, queue_next_index_gpu.memory());
 			kernel.setArgument(1, queue_value_gpu.memory());
 			auto kernel_event = kernel.launch(lane.queue, 0, N);
-			printf("[%s] queue_use_local kernel %f ms\n", device_name.c_str(), kernel_event->wait());
+			// printf("[%s] queue_use_local kernel %f ms\n", device_name.c_str(), kernel_event->wait());
 
 			std::vector<int32_t> queue_value(N);
 			queue_next_index_gpu.readImmediately(&queue_next_index, lane.queue);
@@ -174,7 +178,7 @@ TEST_CASE("AABB", "[AABB]") {
 		OpenCLContext context;
 
 		for (auto o : alembicscene->objects) {
-			UNSCOPED_INFO("object : " << o->name);
+			INFO("object : " << o->name);
 
 			auto p = o.as_point();
 			if (p == nullptr) {
@@ -208,7 +212,7 @@ TEST_CASE("AABB", "[AABB]") {
 
 			int deviceCount = context.deviceCount();
 			for (int device_index = 0; device_index < deviceCount; ++device_index) {
-				UNSCOPED_INFO("device name : " << context.device_info(device_index).name);
+				INFO("device name : " << context.device_info(device_index).name);
 
 				auto lane = context.lane(device_index);
 

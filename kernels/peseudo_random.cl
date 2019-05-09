@@ -63,18 +63,4 @@ __kernel void random_initialize(__global uint4 *states, uint seed_offset) {
     states[gid] = s;
 }
 
-__kernel void random_generate(__global uint4 *states, __global float4 *values) {
-    size_t gid = get_global_id(0);
-    uint4 s = states[gid];
-    float4 v;
-    for(int i = 0 ; i < 100000 ; ++i) {
-        v.x = random_uniform(&s);
-        v.y = random_uniform(&s);
-        v.z = random_uniform(&s);
-        v.w = random_uniform(&s);
-    }
-    states[gid] = s;
-    values[gid] = v;
-}
-
 #endif

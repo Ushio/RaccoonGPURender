@@ -6,7 +6,7 @@ __kernel void queue_simple(__global uint *queue_next_index, __global int *queue_
     }
 }
 
-// 複雑にはなるが、若干高速
+// 複雑にはなるが、若干高速 
 __kernel void queue_use_local(__global uint *queue_next_index, __global int *queue_value) {
     local uint queue_next_index_local;
     local uint queue_next_base_local;

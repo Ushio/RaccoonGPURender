@@ -71,7 +71,12 @@ namespace rt {
 				s[0] = 1;
 			}
 		}
-
+		Xoshiro128StarStar(uint32_t x, uint32_t y, uint32_t z, uint32_t w) {
+			s[0] = x;
+			s[1] = y;
+			s[2] = z;
+			s[3] = w;
+		}
 		float uniform_float() override {
 			uint32_t x = next();
 			uint32_t bits = (x >> 9) | 0x3f800000;

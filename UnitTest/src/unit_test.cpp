@@ -5,6 +5,7 @@
 #include "threaded_bvh.hpp"
 #include "raccoon_ocl.hpp"
 #include "houdini_alembic.hpp"
+#include "peseudo_random.hpp"
 
 void run_unit_test() {
 	static Catch::Session session;
@@ -21,7 +22,52 @@ void run_unit_test() {
 	session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
 }
 
-TEST_CASE("Atomic", "[Atomic]") {
+TEST_CASE("Random") {
+	using namespace rt;
+	auto &env = OpenCLProgramEnvioronment::instance();
+	env.setSourceDirectory(ofToDataPath(""));
+	env.addInclude(ofToDataPath("../../../kernels"));
+
+	OpenCLContext context;
+
+	int deviceCount = context.deviceCount();
+	for (int device_index = 0; device_index < deviceCount; ++device_index) {
+		INFO("device name : " << context.device_info(device_index).name);
+
+		auto lane = context.lane(device_index);
+
+		OpenCLProgram program("random_unit_test.cl", lane.context, lane.device_id);
+
+		int N = 100000;
+		std::vector<glm::uvec4> state(N);
+		OpenCLBuffer<glm::uvec4> state_gpu(lane.context, N);
+		{
+			OpenCLKernel kernel("random_initialize", program.program());
+			kernel.setArgument(0, state_gpu.memory());
+			kernel.setArgument(1, 0 /* offset */);
+			kernel.launch(lane.queue, 0, N);
+		}
+		
+		OpenCLKernel kernel("random_generate", program.program());
+		OpenCLBuffer<float> value_gpu(lane.context, N);
+		std::vector<float> value(N);
+		for (int i = 0; i < 10; ++i) {
+			state_gpu.readImmediately(state.data(), lane.queue);
+
+			kernel.setArgument(0, state_gpu.memory());
+			kernel.setArgument(1, value_gpu.memory());
+			kernel.launch(lane.queue, 0, N);
+			value_gpu.readImmediately(value.data(), lane.queue);
+
+			for (int j = 0; j < N; ++j) {
+				Xoshiro128StarStar random(state[j].x, state[j].y, state[j].z, state[j].w);
+				REQUIRE(value[j] == Approx(random.uniform()).margin(1.0e-5f));
+			}
+		}
+	}
+}
+
+TEST_CASE("Atomic") {
 	using namespace rt;
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath(""));
@@ -67,7 +113,7 @@ TEST_CASE("Atomic", "[Atomic]") {
 	}
 }
 
-TEST_CASE("Simple Queue", "[Simple Queue]") {
+TEST_CASE("Simple Queue") {
 	using namespace rt;
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath(""));
@@ -128,7 +174,7 @@ TEST_CASE("Simple Queue", "[Simple Queue]") {
 	}
 }
 
-TEST_CASE("AABB", "[AABB]") {
+TEST_CASE("AABB") {
 	using namespace rt;
 
 	houdini_alembic::AlembicStorage storage;

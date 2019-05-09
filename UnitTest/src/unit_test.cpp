@@ -15,6 +15,7 @@ void run_unit_test() {
 		"yes",
 		"--use-colour",
 		"auto",
+
 		"",
 	};
 	session.run(sizeof(custom_argv) / sizeof(custom_argv[0]), custom_argv);
@@ -35,21 +36,34 @@ TEST_CASE("Atomic", "[Atomic]") {
 		auto lane = context.lane(device_index);
 
 		OpenCLProgram program("atomic_unit_test.cl", lane.context, lane.device_id);
-		OpenCLKernel kernel("run", program.program());
+		{
+			OpenCLKernel kernel("run_global", program.program());
 
-		const int N = 100000;
-		int32_t sum_i = 0;
-		float sum_f = 0;
-		OpenCLBuffer<int32_t> sum_i_gpu(lane.context, &sum_i, 1);
-		OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
-		kernel.setArgument(0, sum_i_gpu.memory());
-		kernel.setArgument(1, sum_f_gpu.memory());
-		kernel.launch(lane.queue, 0, N);
+			const int N = 100001;
+			int32_t sum_i = 0;
+			float sum_f = 0;
+			OpenCLBuffer<int32_t> sum_i_gpu(lane.context, &sum_i, 1);
+			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
+			kernel.setArgument(0, sum_i_gpu.memory());
+			kernel.setArgument(1, sum_f_gpu.memory());
+			kernel.launch(lane.queue, 0, N);
 
-		sum_i_gpu.readImmediately(&sum_i, lane.queue);
-		sum_f_gpu.readImmediately(&sum_f, lane.queue);
-		REQUIRE(sum_i == N);
-		REQUIRE((int)sum_f == N);
+			sum_i_gpu.readImmediately(&sum_i, lane.queue);
+			sum_f_gpu.readImmediately(&sum_f, lane.queue);
+			REQUIRE(sum_i == N);
+			REQUIRE((int)sum_f == N);
+		}
+		{
+			OpenCLKernel kernel("run_local_global", program.program());
+
+			const int N = 100001;
+			float sum_f = 0;
+			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
+			kernel.setArgument(0, sum_f_gpu.memory());
+			kernel.launch(lane.queue, 0, N);
+			sum_f_gpu.readImmediately(&sum_f, lane.queue);
+			REQUIRE((int)sum_f == N);
+		}
 	}
 }
 

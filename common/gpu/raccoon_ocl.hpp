@@ -11,6 +11,27 @@
 #include "assertion.hpp"
 
 namespace rt {
+	struct alignas(16) OpenCLFloat3 {
+		float x;
+		float y;
+		float z;
+		char align[4];
+
+		OpenCLFloat3() {}
+		OpenCLFloat3(const glm::vec3 &v)
+			: x(v.x)
+			, y(v.y)
+			, z(v.z) {
+		}
+		void operator=(const glm::vec3 &v) {
+			x = v.x;
+			y = v.y;
+			z = v.z;
+		}
+		glm::vec3 as_vec3() const {
+			return glm::vec3(x, y, z);
+		}
+	};
 	struct alignas(16) OpenCLFloat4 {
 		float x;
 		float y;
@@ -83,7 +104,7 @@ namespace rt {
 		return status;
 	}
 
-#define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; sprintf(buffer, "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
+#define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
 
 	class OpenCLEvent {
 	public:
@@ -273,7 +294,7 @@ namespace rt {
 		void operator=(const OpenCLContext&) = delete;
 
 		int deviceCount() const {
-			return _deviceContexts.size();
+			return (int)_deviceContexts.size();
 		}
 		OpenCLLane lane(int index) const {
 			RT_ASSERT(0 <= index && index < _deviceContexts.size());

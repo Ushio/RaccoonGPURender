@@ -17,8 +17,10 @@ void ofApp::setup() {
 	_camera.setFarClip(100.0f);
 	_camera.setDistance(5.0f);
 
+	_camera_model.load("../../../scenes/camera_model.ply");
+
 	auto &env = OpenCLProgramEnvioronment::instance();
-	env.setSourceDirectory(ofToDataPath(""));
+	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
 
 	context_ptr = new OpenCLContext();
@@ -37,8 +39,7 @@ void ofApp::setup() {
 	}
 
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
-
-	_camera_model.load("../../../scenes/camera_model.ply");
+	
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();

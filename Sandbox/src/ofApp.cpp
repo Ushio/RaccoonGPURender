@@ -2,6 +2,12 @@
 #include "ofxRaccoonImGui.hpp"
 #include "raccoon_ocl.hpp"
 #include "peseudo_random.hpp"
+#include "wavefront_path_tracing.hpp"
+
+using namespace rt;
+
+OpenCLContext *context_ptr;
+WavefrontPathTracing *pt;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -11,92 +17,28 @@ void ofApp::setup() {
 	_camera.setFarClip(100.0f);
 	_camera.setDistance(5.0f);
 
-	using namespace rt;
+	auto &env = OpenCLProgramEnvioronment::instance();
+	env.setSourceDirectory(ofToDataPath(""));
+	env.addInclude(ofToDataPath("../../../kernels"));
 
-	OpenCLProgramEnvioronment::instance().setSourceDirectory(ofToDataPath("../../../kernels"));
+	context_ptr = new OpenCLContext();
+	RT_ASSERT(0 < context_ptr->deviceCount());
 
-	int n = 1000 * 1000;
-	OpenCLContext context;
+	houdini_alembic::AlembicStorage storage;
+	std::string error_message;
+	storage.open(ofToDataPath("../../../scenes/wavefront_scene.abc"), error_message);
 
-	int deviceCount = context.deviceCount();
-	deviceCount = 2;
-	for (int device_index = 0; device_index < deviceCount; ++device_index) {
-		auto lane = context.lane(device_index);
-
-		OpenCLProgram program("peseudo_random.cl", lane.context, lane.device_id);
-
-		int seed_offset = 100;
-		OpenCLBuffer<glm::uvec4> states_gpu(lane.context, n);
-		{
-			OpenCLKernel kernel("random_initialize", program.program());
-			kernel.setArgument(0, states_gpu.memory());
-			kernel.setArgument(1, seed_offset);
-			kernel.launch(lane.queue, 0, n);
-		}
-
-		std::vector<glm::uvec4> states(n);
-		states_gpu.readImmediately(states.data(), lane.queue);
-
-		for (int i = 0; i < n; ++i) {
-			Xoshiro128StarStar random(seed_offset + i);
-			RT_ASSERT(states[i] == random.state());
-		}
-
-		OpenCLBuffer<glm::vec4> values_gpu(lane.context, n);
-		{
-			OpenCLKernel kernel("random_generate", program.program());
-			kernel.setArgument(0, states_gpu.memory());
-			kernel.setArgument(1, values_gpu.memory());
-			auto e = kernel.launch(lane.queue, 0, n);
-			auto gpu_time = e->wait();
-			printf("random_generate : %f\n", gpu_time);
-		}
-
-
-		// Queuing
-		{
-			OpenCLKernel kernel("random_generate", program.program());
-			kernel.setArgument(0, states_gpu.memory());
-			kernel.setArgument(1, values_gpu.memory());
-
-			std::queue<std::shared_ptr<OpenCLEvent>> eventQueue;
-			for (int i = 0; i < 10; ++i) {
-				eventQueue.push(kernel.launch(lane.queue, 0, n));
-			}
-
-			for (int i = 0; i < 3 ; ++i) {
-				auto p = eventQueue.front();
-				eventQueue.pop();
-				p->wait();
-				eventQueue.push(kernel.launch(lane.queue, 0, n));
-
-				//std::vector<glm::vec4> values(n);
-				//values_gpu.readImmediately(values.data(), queue);
-			}
-
-			while (!eventQueue.empty()) {
-				auto p = eventQueue.front();
-				eventQueue.pop();
-				p->wait();
-			}
-			//break;
-		}
-
-		//std::vector<glm::vec4> values(n);
-		//values_gpu.readImmediately(values.data(), queue);
-
-		//for (int i = 0; i < n; ++i) {
-		//	Xoshiro128StarStar random(seed_offset + i);
-		//	float x = random.uniform();
-		//	float y = random.uniform();
-		//	float z = random.uniform();
-		//	float w = random.uniform();
-		//	RT_ASSERT(std::fabs(values[i].x - x) <= 1.0e-9f);
-		//	RT_ASSERT(std::fabs(values[i].y - y) <= 1.0e-9f);
-		//	RT_ASSERT(std::fabs(values[i].z - z) <= 1.0e-9f);
-		//	RT_ASSERT(std::fabs(values[i].w - w) <= 1.0e-9f);
-		//}
+	if (storage.isOpened()) {
+		std::string error_message;
+		_alembicscene = storage.read(0, error_message);
 	}
+	if (error_message.empty() == false) {
+		printf("sample error_message: %s\n", error_message.c_str());
+	}
+
+	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
+
+	_camera_model.load("../../../scenes/camera_model.ply");
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -109,6 +51,8 @@ void ofApp::update() {
 
 //--------------------------------------------------------------
 void ofApp::draw(){
+	static bool show_scene_preview = true;
+
 	ofEnableDepthTest();
 
 	ofClear(0);
@@ -123,6 +67,10 @@ void ofApp::draw(){
 	ofDrawAxis(50);
 
 	ofSetColor(255);
+
+	if (_alembicscene && show_scene_preview) {
+		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
+	}
 
 	_camera.end();
 
@@ -145,6 +93,16 @@ void ofApp::draw(){
 	ImGui::SetNextWindowBgAlpha(0.5f);
 
 	ImGui::Begin("settings", nullptr);
+	ImGui::Checkbox("scene preview", &show_scene_preview);
+
+	int deviceCount = context_ptr->deviceCount();
+	for (int device_index = 0; device_index < deviceCount; ++device_index) {
+		auto info = context_ptr->device_info(device_index);
+		ofxRaccoonImGui::Tree(info.name.c_str(), false, [&]() {
+			ImGui::Text(info.version.c_str());
+			ImGui::TextWrapped(info.extensions.c_str());
+		});
+	}
 
 	ImGui::End();
 

@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "ofMain.h"
+#include "houdini_alembic.hpp"
+#include "alembic_preview.hpp"
 
 class ofApp : public ofBaseApp{
 public:
@@ -24,4 +26,7 @@ public:
 
 	ofEasyCam _camera;
 	ofImage _image;
+
+	ofMesh _camera_model;
+	std::shared_ptr<houdini_alembic::AlembicScene> _alembicscene;
 };

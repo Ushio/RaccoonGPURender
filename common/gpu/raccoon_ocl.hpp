@@ -11,6 +11,19 @@
 #include "assertion.hpp"
 
 namespace rt {
+	struct alignas(8) OpenCLUInt2 {
+		uint32_t x;
+		uint32_t y;
+		OpenCLUInt2() {}
+		OpenCLUInt2(const glm::uvec2 &v)
+			: x(v.x)
+			, y(v.y){
+		}
+		glm::uvec2 as_vec2() const {
+			return glm::uvec2(x, y);
+		}
+	};
+
 	struct alignas(16) OpenCLFloat3 {
 		float x;
 		float y;
@@ -150,12 +163,12 @@ namespace rt {
 	template <class T>
 	class OpenCLBuffer {
 	public:
-		OpenCLBuffer(cl_context context, T *value, uint32_t length)
+		OpenCLBuffer(cl_context context, const T *value, uint32_t length)
 			: _context(context)
 			, _length(length) {
 
 			cl_int status;
-			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, length * sizeof(T), value, &status);
+			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
 			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
@@ -408,8 +421,6 @@ namespace rt {
 
 		template <class T>
 		void setArgument(int i, T value) {
-			REQUIRE_OR_EXCEPTION(_kernel.get(), "call selectKernel() before.");
-
 			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(value), &value);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}

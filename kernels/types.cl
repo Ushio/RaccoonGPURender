@@ -7,6 +7,7 @@ typedef struct {
     float3 ro;
     float3 rd;
     uint depth;
-} WFPath;
+    uint pixel_index;
+} WavefrontPath;
 
 #endif

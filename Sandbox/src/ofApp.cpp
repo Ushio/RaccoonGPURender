@@ -39,7 +39,6 @@ void ofApp::setup() {
 	}
 
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
-	
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -53,6 +52,7 @@ void ofApp::update() {
 //--------------------------------------------------------------
 void ofApp::draw(){
 	static bool show_scene_preview = true;
+	static int frame = 0;
 
 	ofEnableDepthTest();
 
@@ -72,6 +72,17 @@ void ofApp::draw(){
 	if (_alembicscene && show_scene_preview) {
 		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	}
+
+	//static std::vector<WavefrontPath> wavefrontPath(kWavefrontPathCount);
+	//auto wavefrontLane = pt->_wavefrontLane.get();
+	//wavefrontLane->_mem_path->readImmediately(wavefrontPath.data(), wavefrontLane->_lane.queue);
+
+	//ofSetColor(255);
+	//for (int i = 0; i < 60 * 80; ++i) {
+	//	int n = kWavefrontPathCount / (60 * 80);
+	//	int index = (i + (frame % n) * 60 * 80);
+	//	ofDrawLine(wavefrontPath[index].ro.as_vec3(), wavefrontPath[index].ro.as_vec3() + wavefrontPath[index].rd.as_vec3() * 10.0f);
+	//}
 
 	_camera.end();
 
@@ -95,7 +106,8 @@ void ofApp::draw(){
 
 	ImGui::Begin("settings", nullptr);
 	ImGui::Checkbox("scene preview", &show_scene_preview);
-
+	ImGui::InputInt("frame", &frame);
+	
 	int deviceCount = context_ptr->deviceCount();
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
 		auto info = context_ptr->device_info(device_index);

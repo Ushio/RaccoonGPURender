@@ -5,6 +5,7 @@
 #include "threaded_bvh.hpp"
 #include "peseudo_random.hpp"
 #include "houdini_alembic.hpp"
+#include "scene_manager.hpp"
 
 /*
 ワーカースレッドを作る必要があるが、
@@ -61,7 +62,7 @@ namespace rt {
 
 	class WavefrontLane {
 	public:
-		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera):_lane(lane), _camera(camera) {
+		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager):_lane(lane), _camera(camera) {
 			_program_random = unique(new OpenCLProgram("peseudo_random.cl", lane.context, lane.device_id));
 			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", _program_random->program()));
 
@@ -78,6 +79,8 @@ namespace rt {
 
 			_queue_new_path_item = unique(new OpenCLBuffer<uint32_t>(lane.context, kWavefrontPathCount));
 			_queue_new_path_count = unique(new OpenCLBuffer<uint32_t>(lane.context, 1));
+
+			_sceneBuffer = sceneManager.createBuffer(lane.context);
 		}
 
 		std::shared_ptr<OpenCLEvent> initialize(int lane_index) {
@@ -97,6 +100,9 @@ namespace rt {
 			_kernel_new_path->setArgument(new_path_arg++, _mem_next_pixel_index->memory());
 			_kernel_new_path->setArgument(new_path_arg++, standardCamera(_camera));
 			_kernel_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+			// auto eventNewPath = 
+			//auto elapsedNewPath = eventNewPath->wait();
+			//printf("new path: %f ms\n", elapsedNewPath);
 
 			_kernel_advance_next_pixel_index->setArgument(0, _mem_next_pixel_index->memory());
 			_kernel_advance_next_pixel_index->setArgument(1, _queue_new_path_count->memory());
@@ -110,8 +116,12 @@ namespace rt {
 
 			return std::shared_ptr<OpenCLEvent>();
 		}
+
+
 		OpenCLLane _lane;
 		houdini_alembic::CameraObject *_camera;
+
+		std::unique_ptr<SceneBuffer> _sceneBuffer;
 
 		// kernels
 		std::unique_ptr<OpenCLProgram> _program_random;
@@ -147,14 +157,16 @@ namespace rt {
 						_camera = camera;
 					}
 				}
-				//if (auto polymesh = o.as_polygonMesh()) {
-				//	addPolymesh(polymesh);
-				//}
+				if (auto polymesh = o.as_polygonMesh()) {
+					_sceneManager.addPolymesh(polymesh);
+				}
 			}
 			RT_ASSERT(_camera);
 
+			_sceneManager.buildBVH();
+
 			auto lane = context->lane(0);
-			_wavefrontLane = unique(new WavefrontLane(lane, _camera));
+			_wavefrontLane = unique(new WavefrontLane(lane, _camera, _sceneManager));
 			_wavefrontLane->initialize(0);
 
 			//uint32_t count;
@@ -166,6 +178,7 @@ namespace rt {
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
 		houdini_alembic::CameraObject *_camera = nullptr;
 
+		SceneManager _sceneManager;
 		std::unique_ptr<WavefrontLane> _wavefrontLane;
 	};
 }

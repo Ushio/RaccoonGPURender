@@ -5,12 +5,12 @@
   <PropertyGroup />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common/gpu;$(ProjectDir)../common;$(EMBREE_ROOT)/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common/gpu;$(ProjectDir)../common;$(EMBREE_ROOT)/include;$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(EMBREE_ROOT)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>embree3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(EMBREE_ROOT)\lib;$(CUDA_PATH)\lib\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>embree3.lib;OpenCL.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>robocopy "$(EMBREE_ROOT)\bin" $(TargetDir) embree3.dll

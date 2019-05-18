@@ -4,16 +4,12 @@
 #include <functional>
 #include <future>
 #include <glm/glm.hpp>
+#include <tbb/concurrent_queue.h>
 #include "raccoon_ocl.hpp"
 #include "threaded_bvh.hpp"
 #include "peseudo_random.hpp"
 #include "houdini_alembic.hpp"
 #include "scene_manager.hpp"
-
-/*
-ワーカースレッドを作る必要があるが、
-
-*/
 
 namespace rt {
 	static const uint32_t kWavefrontPathCount = 1 << 24; /* 2^24 */
@@ -153,12 +149,70 @@ namespace rt {
 			add(e);
 		}
 		std::queue<std::shared_ptr<OpenCLEvent>> _queue;
-		int _maxItem = 64;
+		int _maxItem = 32;
 	};
+
+	class IImageReciever {
+	public:
+		virtual void set_image(RGBA8ValueType *p, int w, int h) = 0;
+	};
+
+	class WorkerThread {
+	public:
+		WorkerThread() {
+			_continue = true;
+			_thread = std::thread([&](){
+				while(_continue) {
+					std::function<void(void)> item;
+					if (_items.try_pop(item)) {
+						item();
+					}
+					else {
+						std::this_thread::sleep_for(std::chrono::nanoseconds(1));
+					}
+				}
+			});
+		}
+		~WorkerThread() {
+			_continue = false;
+			_thread.join();
+
+			for (auto it = _items.unsafe_begin(); it != _items.unsafe_end(); ++it) {
+				(*it)();
+			}
+		}
+
+		void run(std::function<void(void)> item) {
+			_items.push(item);
+		}
+		std::atomic<bool> _continue;
+		std::thread _thread;
+		tbb::concurrent_queue<std::function<void(void)>> _items;
+	};
+
+	inline void transfer_image(WorkerThread &group, OpenCLBuffer<RGBA8ValueType> *buffer, cl_command_queue queue, IImageReciever *reciever, int w, int h) {
+		if (reciever == nullptr) {
+			return;
+		}
+
+		typedef RGBA8ValueType *RGBA8ValueTypePtr;
+		std::shared_ptr<RGBA8ValueTypePtr> mapPtr(new RGBA8ValueTypePtr);
+
+		// fire task but wait at worker thread. 
+		// あとなぜかmapを違うスレッドから実行すると、データコピー時にアイドルが発生する。
+		auto mapEvent = buffer->map_readonly(mapPtr.get(), queue);
+
+		group.run([=]() {
+			mapEvent->wait();
+			reciever->set_image(*mapPtr, w, h);
+			buffer->unmap(*mapPtr, queue);
+		});
+	}
 
 	class WavefrontLane {
 	public:
-		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager):_lane(lane), _camera(camera) {
+		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager)
+			:_lane(lane), _camera(camera) {
 			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
 			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
 
@@ -205,6 +259,9 @@ namespace rt {
 			_image_normal = unique(new OpenCLBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
+		}
+		~WavefrontLane() {
+
 		}
 
 		void initialize(int lane_index) {
@@ -285,20 +342,9 @@ namespace rt {
 				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(1, _image_normal->memory());
 				_eventQueue += _kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
 			}
-
-			if (_colorMapEvent) {
-				if (_colorMapEvent->is_done()) {
-					if (onColorImageReceived) {
-						onColorImageReceived(_colorMapPtr, _camera->resolution_x, _camera->resolution_y);
-					}
-					_image_color->unmap(_colorMapPtr, _lane.queue);
-					_colorMapEvent = std::shared_ptr<OpenCLEvent>();
-				}
-			}
-			else {
-				_colorMapEvent = _image_color->map_readonly(&_colorMapPtr, _lane.queue);
-				_eventQueue += _colorMapEvent;
-			}
+			
+			transfer_image(_imageWorker, _image_color.get(), _lane.queue, colorReciever, _camera->resolution_x, _camera->resolution_y);
+			transfer_image(_imageWorker, _image_normal.get(), _lane.queue, normalReciever, _camera->resolution_x, _camera->resolution_y);
 		}
 
 		OpenCLLane _lane;
@@ -345,11 +391,10 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<RGBA8ValueType>> _image_color;
 		std::unique_ptr<OpenCLBuffer<RGBA8ValueType>> _image_normal;
 
-		// event
-		std::shared_ptr<OpenCLEvent> _colorMapEvent;
-		RGBA8ValueType *_colorMapPtr = nullptr;
-		std::function<void(RGBA8ValueType *, int, int)> onColorImageReceived;
+		IImageReciever *colorReciever = nullptr;
+		IImageReciever *normalReciever = nullptr;
 
+		WorkerThread _imageWorker;
 		EventQueue _eventQueue;
 	};
 
@@ -378,14 +423,35 @@ namespace rt {
 			_sceneManager.buildBVH();
 
 			auto lane = context->lane(0);
+
 			_wavefrontLane = unique(new WavefrontLane(lane, _camera, _sceneManager));
 			_wavefrontLane->initialize(0);
+
+			_continue = true;
+
+			_workers.emplace_back([&](){
+				while (_continue) {
+					_wavefrontLane->step();
+				}
+			});
 		}
+		~WavefrontPathTracing() {
+			_continue = false;
+			for (int i = 0; i < _workers.size(); ++i) {
+				_workers[i].join();
+			}
+		}
+
 		OpenCLContext *_context;
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
 		houdini_alembic::CameraObject *_camera = nullptr;
 
 		SceneManager _sceneManager;
+
+		// 仮
 		std::unique_ptr<WavefrontLane> _wavefrontLane;
+
+		std::atomic<bool> _continue;
+		std::vector<std::thread> _workers;
 	};
 }

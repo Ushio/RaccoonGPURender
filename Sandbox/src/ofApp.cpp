@@ -9,8 +9,36 @@ using namespace rt;
 OpenCLContext *context_ptr;
 WavefrontPathTracing *pt;
 
-std::mutex image_mutex;
-ofPixels color_image;
+class ImageRecieverForOF : public IImageReciever {
+public:
+	ImageRecieverForOF() {
+		_dirty = false;
+	}
+	virtual void set_image(RGBA8ValueType *p, int w, int h) {
+		{
+			std::lock_guard<std::mutex> scoped_lock(_mutex);
+			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
+		}
+		_dirty = true;
+	}
+
+	ofImage &get_image() {
+		if (_dirty) {
+			std::lock_guard<std::mutex> scoped_lock(_mutex);
+			_image.setFromPixels(_imagedata);
+		}
+		return _image;
+	}
+private:
+	std::atomic<bool> _dirty;
+	ofPixels _imagedata;
+	ofImage _image;
+	std::mutex _mutex;
+};
+
+ImageRecieverForOF colorReciever;
+ImageRecieverForOF normalReciever;
+
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -45,17 +73,9 @@ void ofApp::setup() {
 	}
 
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
-	pt->_wavefrontLane->onColorImageReceived = [&](RGBA8ValueType *p, int w, int h) {
-		std::lock_guard<std::mutex> lock(image_mutex);
-		color_image.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
-	};
-
-	std::thread th([] {
-		for (;;) {
-			pt->_wavefrontLane->step();
-		}
-	});
-	th.detach();
+	pt->_wavefrontLane->colorReciever = &colorReciever;
+	pt->_wavefrontLane->normalReciever = &normalReciever;
+	
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -134,16 +154,21 @@ void ofApp::draw() {
 			ImGui::TextWrapped(info.extensions.c_str());
 		});
 	}
-	
-	if (ofGetFrameNum() % 5 == 0) {
-		std::lock_guard<std::mutex> lock(image_mutex);
-		_image.setFromPixels(color_image);
-	}
-
-	ofxRaccoonImGui::image(_image);
 
 	ImGui::End();
 
+	auto showImage = [](const char *label, ofImage &image) {
+		if (image.isAllocated() == false) {
+			return;
+		}
+
+		ImGui::SetNextWindowSize(ImVec2(image.getWidth() + 50, image.getHeight() + 50), ImGuiCond_Appearing);
+		ImGui::Begin(label);
+		ofxRaccoonImGui::image(image);
+		ImGui::End();
+	};
+	showImage("color", colorReciever.get_image());
+	showImage("normal", normalReciever.get_image());
 }
 
 //--------------------------------------------------------------

@@ -31,4 +31,17 @@ __kernel void RGB24Accumulation_to_RGBA8_linear(__global RGB24AccumulationValueT
     rgba8[gid].z = (uchar)clamp((int)(b * 256.0f), 0, 255);
     rgba8[gid].w = 255;
 }
+
+__kernel void RGB24Accumulation_to_RGBA8_tonemap_simplest(__global RGB24AccumulationValueType *rgb24, __global uchar4 *rgba8) {
+    uint gid = get_global_id(0);
+    float n = rgb24[gid].sampleCount;
+    float r = rgb24[gid].r / n;
+    float g = rgb24[gid].g / n;
+    float b = rgb24[gid].b / n;
+    rgba8[gid].x = (uchar)clamp((int)(pow(r, 1.0f / 2.2f) * 256.0f), 0, 255);
+    rgba8[gid].y = (uchar)clamp((int)(pow(g, 1.0f / 2.2f) * 256.0f), 0, 255);
+    rgba8[gid].z = (uchar)clamp((int)(pow(b, 1.0f / 2.2f) * 256.0f), 0, 255);
+    rgba8[gid].w = 255;
+}
+
 #endif

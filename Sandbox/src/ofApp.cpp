@@ -9,8 +9,14 @@ using namespace rt;
 OpenCLContext *context_ptr;
 WavefrontPathTracing *pt;
 
+std::mutex image_mutex;
+ofPixels color_image;
+
 //--------------------------------------------------------------
 void ofApp::setup() {
+	// ofSetVerticalSync(false);
+	ofEnableArbTex();
+
 	ofxRaccoonImGui::initialize();
 
 	_camera.setNearClip(0.1f);
@@ -39,6 +45,17 @@ void ofApp::setup() {
 	}
 
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
+	pt->_wavefrontLane->onColorImageReceived = [&](RGBA8ValueType *p, int w, int h) {
+		std::lock_guard<std::mutex> lock(image_mutex);
+		color_image.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
+	};
+
+	std::thread th([] {
+		for (;;) {
+			pt->_wavefrontLane->step();
+		}
+	});
+	th.detach();
 }
 void ofApp::exit() {
 	ofxRaccoonImGui::shutdown();
@@ -50,7 +67,7 @@ void ofApp::update() {
 }
 
 //--------------------------------------------------------------
-void ofApp::draw(){
+void ofApp::draw() {
 	static bool show_scene_preview = true;
 	static int frame = 0;
 
@@ -100,11 +117,12 @@ void ofApp::draw(){
 	}
 
 	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Appearing);
-	ImGui::SetNextWindowSize(ImVec2(300, 300), ImGuiCond_Appearing);
+	ImGui::SetNextWindowSize(ImVec2(1000, 900), ImGuiCond_Appearing);
 	ImGui::SetNextWindowCollapsed(false, ImGuiCond_Appearing);
 	ImGui::SetNextWindowBgAlpha(0.5f);
 
 	ImGui::Begin("settings", nullptr);
+	ImGui::Text("FPS : %f", ofGetFrameRate());
 	ImGui::Checkbox("scene preview", &show_scene_preview);
 	ImGui::InputInt("frame", &frame);
 	
@@ -116,6 +134,13 @@ void ofApp::draw(){
 			ImGui::TextWrapped(info.extensions.c_str());
 		});
 	}
+	
+	if (ofGetFrameNum() % 5 == 0) {
+		std::lock_guard<std::mutex> lock(image_mutex);
+		_image.setFromPixels(color_image);
+	}
+
+	ofxRaccoonImGui::image(_image);
 
 	ImGui::End();
 

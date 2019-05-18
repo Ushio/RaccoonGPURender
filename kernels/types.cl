@@ -6,7 +6,7 @@ typedef struct {
     float3 L;
     float3 ro;
     float3 rd;
-    uint depth;
+    uint logic_i;
     uint pixel_index;
 } WavefrontPath;
 
@@ -15,6 +15,11 @@ typedef struct {
     float tmin;
     float3 Ng;
 } ExtensionResult;
+
+typedef struct {
+    float3 Le;
+    float3 T;
+} ShadingResult;
 
 typedef __attribute__ ((aligned(16))) struct {
     float r;

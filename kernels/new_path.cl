@@ -18,6 +18,7 @@ __kernel void new_path(
     __global const uint *queue_item, 
     __global const uint *queue_count, 
     __global WavefrontPath *wavefrontPath, 
+    __global ShadingResult *shading_results, 
     __global uint4 *random_states,
     __global const ulong *next_pixel_index,
     StandardCamera camera) {
@@ -33,7 +34,7 @@ __kernel void new_path(
 
     wavefrontPath[path_index].T = (float3)(1.0f, 1.0f, 1.0f);
     wavefrontPath[path_index].L = (float3)(0.0f, 0.0f, 0.0f);
-    wavefrontPath[path_index].depth = 0;
+    wavefrontPath[path_index].logic_i = 0;
 
     ulong global_pixel_index = *next_pixel_index + (ulong)gid;
     uint pixel_index = (uint)(global_pixel_index % (ulong)(camera.image_size.x * camera.image_size.y));
@@ -46,7 +47,7 @@ __kernel void new_path(
         = camera.imageplane_o 
         + camera.imageplane_r * ((float)x + random_uniform(&random_state))
         + camera.imageplane_b * ((float)y + random_uniform(&random_state));
-        
+    
     // float3 sample_on_objectplane
     //     = camera.imageplane_o 
     //     + camera.imageplane_r * ((float)x + 0.5f)
@@ -56,9 +57,14 @@ __kernel void new_path(
     wavefrontPath[path_index].rd = normalize(sample_on_objectplane - camera.eye);
 
     random_states[path_index] = random_state;
+
+    shading_results[path_index].Le = (float3)(0.0f);
+    shading_results[path_index].T  = (float3)(1.0f);
 }
 
-__kernel void advance_next_pixel_index(__global ulong *next_pixel_index, __global const uint *queue_count) {
+__kernel void finalize_new_path(__global ulong *next_pixel_index, __global uint *queue_count) {
     *next_pixel_index += *queue_count;
+    *queue_count = 0;
 }
+
 #endif

@@ -1,0 +1,387 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<FileVersion>1</FileVersion>
+<CodeXL>
+    <ProjectName>Sandbox</ProjectName>
+    <ApplicationPath>C:\Users\ushio\Documents\RayTracing\of_v0.10.1_vs2017_release\apps\RaccoonGPURender\Sandbox\bin\Sandbox.exe</ApplicationPath>
+    <StoreApp>no</StoreApp>
+    <WorkingDirectory>C:\Users\ushio\Documents\RayTracing\of_v0.10.1_vs2017_release\apps\RaccoonGPURender\Sandbox\bin</WorkingDirectory>
+    <SourceFilesDirectory>C:\Users\ushio\Documents\RayTracing\of_v0.10.1_vs2017_release\apps\RaccoonGPURender\Sandbox\src;C:\Users\ushio\Documents\RayTracing\of_v0.10.1_vs2017_release\apps\RaccoonGPURender\common;C:\Users\ushio\Documents\RayTracing\of_v0.10.1_vs2017_release\apps\RaccoonGPURender\kernels</SourceFilesDirectory>
+    <SourceCodeRootDirectory>CodeXLEmptyString</SourceCodeRootDirectory>
+    <ApplicationArguments>CodeXLEmptyString</ApplicationArguments>
+    <LastActiveMode>Profile Mode</LastActiveMode>
+    <IsRemoteSession>no</IsRemoteSession>
+    <RemoteDaemonHostName>CodeXLEmptyString</RemoteDaemonHostName>
+    <RemoteDaemonPortNumber>27015</RemoteDaemonPortNumber>
+    <RecentlyUsedRemoteIPAddresses>;</RecentlyUsedRemoteIPAddresses>
+    <LastSessionType>Application Timeline Trace</LastSessionType>
+    <ProfileName>CodeXLEmptyString</ProfileName>
+    <ApplicationEnvironmentVariables></ApplicationEnvironmentVariables>
+    <ProductExtensions>
+        <GPUDebug>
+            <InterceptionMethod>0</InterceptionMethod>
+            <DebuggerBreakpoints>
+                <Breakpoints />
+            </DebuggerBreakpoints>
+            <OpenGLStateVariables>
+                <StateVariables />
+            </OpenGLStateVariables>
+            <FrameTerminators>131073</FrameTerminators>
+            <GLDebugOutput>
+                <GLDebugOutputLoggingEnabled>false</GLDebugOutputLoggingEnabled>
+                <GLDebugOutputBreakOnReports>false</GLDebugOutputBreakOnReports>
+                <GLDebugOutputMessagesMask>0</GLDebugOutputMessagesMask>
+                <GLDebugOutputSeverity>N/A</GLDebugOutputSeverity>
+            </GLDebugOutput>
+        </GPUDebug>
+        <SharedProfile>
+            <ProfileEntireDuration>true</ProfileEntireDuration>
+            <ProfilePaused>false</ProfilePaused>
+            <ProfileStartDelay>-1</ProfileStartDelay>
+            <ProfileEndAfter>-1</ProfileEndAfter>
+        </SharedProfile>
+        <OpenCLAppTrace>
+            <Session type="Current">
+                <APIType>OpenCL</APIType>
+                <GenerateOccupancyInfo>T</GenerateOccupancyInfo>
+                <AlwaysShowAPIErrorCode>F</AlwaysShowAPIErrorCode>
+                <CollapseAllclGetEventInfoCalls>T</CollapseAllclGetEventInfoCalls>
+                <EnableNavigationToSourceCode>F</EnableNavigationToSourceCode>
+                <GenerateSummaryPage>T</GenerateSummaryPage>
+                <APIsToTrace>F</APIsToTrace>
+                <MaximumNumberOfAPIs>400000</MaximumNumberOfAPIs>
+                <WriteDataTimeOut>F</WriteDataTimeOut>
+                <TimeOutInterval>100</TimeOutInterval>
+                <RuleTree>
+                    <Detect_deprecated_API_calls>T</Detect_deprecated_API_calls>
+                    <Detect_redundant_synchronization>T</Detect_redundant_synchronization>
+                    <Detect_unnecessary_blocking_writes>T</Detect_unnecessary_blocking_writes>
+                    <Detect_non-optimized_data_transfer>T</Detect_non-optimized_data_transfer>
+                    <Detect_failed_API_calls>T</Detect_failed_API_calls>
+                    <Detect_non-optimized_work_size>T</Detect_non-optimized_work_size>
+                    <Detect_resource_leaks>T</Detect_resource_leaks>
+                </RuleTree>
+                <APIsFilterTree>
+                    <clGetPlatformIDs>T</clGetPlatformIDs>
+                    <clGetPlatformInfo>T</clGetPlatformInfo>
+                    <clGetDeviceIDs>T</clGetDeviceIDs>
+                    <clGetDeviceInfo>T</clGetDeviceInfo>
+                    <clCreateContext>T</clCreateContext>
+                    <clCreateContextFromType>T</clCreateContextFromType>
+                    <clRetainContext>T</clRetainContext>
+                    <clReleaseContext>T</clReleaseContext>
+                    <clGetContextInfo>T</clGetContextInfo>
+                    <clCreateCommandQueue>T</clCreateCommandQueue>
+                    <clRetainCommandQueue>T</clRetainCommandQueue>
+                    <clReleaseCommandQueue>T</clReleaseCommandQueue>
+                    <clGetCommandQueueInfo>T</clGetCommandQueueInfo>
+                    <clCreateBuffer>T</clCreateBuffer>
+                    <clCreateSubBuffer>T</clCreateSubBuffer>
+                    <clCreateImage2D>T</clCreateImage2D>
+                    <clCreateImage3D>T</clCreateImage3D>
+                    <clRetainMemObject>T</clRetainMemObject>
+                    <clReleaseMemObject>T</clReleaseMemObject>
+                    <clGetSupportedImageFormats>T</clGetSupportedImageFormats>
+                    <clGetMemObjectInfo>T</clGetMemObjectInfo>
+                    <clGetImageInfo>T</clGetImageInfo>
+                    <clSetMemObjectDestructorCallback>T</clSetMemObjectDestructorCallback>
+                    <clCreateSampler>T</clCreateSampler>
+                    <clRetainSampler>T</clRetainSampler>
+                    <clReleaseSampler>T</clReleaseSampler>
+                    <clGetSamplerInfo>T</clGetSamplerInfo>
+                    <clCreateProgramWithSource>T</clCreateProgramWithSource>
+                    <clCreateProgramWithBinary>T</clCreateProgramWithBinary>
+                    <clRetainProgram>T</clRetainProgram>
+                    <clReleaseProgram>T</clReleaseProgram>
+                    <clBuildProgram>T</clBuildProgram>
+                    <clUnloadCompiler>T</clUnloadCompiler>
+                    <clGetProgramInfo>T</clGetProgramInfo>
+                    <clGetProgramBuildInfo>T</clGetProgramBuildInfo>
+                    <clCreateKernel>T</clCreateKernel>
+                    <clCreateKernelsInProgram>T</clCreateKernelsInProgram>
+                    <clRetainKernel>T</clRetainKernel>
+                    <clReleaseKernel>T</clReleaseKernel>
+                    <clSetKernelArg>T</clSetKernelArg>
+                    <clGetKernelInfo>T</clGetKernelInfo>
+                    <clGetKernelWorkGroupInfo>T</clGetKernelWorkGroupInfo>
+                    <clWaitForEvents>T</clWaitForEvents>
+                    <clGetEventInfo>T</clGetEventInfo>
+                    <clCreateUserEvent>T</clCreateUserEvent>
+                    <clRetainEvent>T</clRetainEvent>
+                    <clReleaseEvent>T</clReleaseEvent>
+                    <clSetUserEventStatus>T</clSetUserEventStatus>
+                    <clSetEventCallback>T</clSetEventCallback>
+                    <clGetEventProfilingInfo>T</clGetEventProfilingInfo>
+                    <clFlush>T</clFlush>
+                    <clFinish>T</clFinish>
+                    <clEnqueueReadBuffer>T</clEnqueueReadBuffer>
+                    <clEnqueueReadBufferRect>T</clEnqueueReadBufferRect>
+                    <clEnqueueWriteBuffer>T</clEnqueueWriteBuffer>
+                    <clEnqueueWriteBufferRect>T</clEnqueueWriteBufferRect>
+                    <clEnqueueCopyBuffer>T</clEnqueueCopyBuffer>
+                    <clEnqueueCopyBufferRect>T</clEnqueueCopyBufferRect>
+                    <clEnqueueReadImage>T</clEnqueueReadImage>
+                    <clEnqueueWriteImage>T</clEnqueueWriteImage>
+                    <clEnqueueCopyImage>T</clEnqueueCopyImage>
+                    <clEnqueueCopyImageToBuffer>T</clEnqueueCopyImageToBuffer>
+                    <clEnqueueCopyBufferToImage>T</clEnqueueCopyBufferToImage>
+                    <clEnqueueMapBuffer>T</clEnqueueMapBuffer>
+                    <clEnqueueMapImage>T</clEnqueueMapImage>
+                    <clEnqueueUnmapMemObject>T</clEnqueueUnmapMemObject>
+                    <clEnqueueNDRangeKernel>T</clEnqueueNDRangeKernel>
+                    <clEnqueueTask>T</clEnqueueTask>
+                    <clEnqueueNativeKernel>T</clEnqueueNativeKernel>
+                    <clEnqueueAcquireD3D10ObjectsKHR>T</clEnqueueAcquireD3D10ObjectsKHR>
+                    <clEnqueueReleaseD3D10ObjectsKHR>T</clEnqueueReleaseD3D10ObjectsKHR>
+                    <clEnqueueAcquireGLObjects>T</clEnqueueAcquireGLObjects>
+                    <clEnqueueReleaseGLObjects>T</clEnqueueReleaseGLObjects>
+                    <clEnqueueMarker>T</clEnqueueMarker>
+                    <clEnqueueWaitForEvents>T</clEnqueueWaitForEvents>
+                    <clEnqueueBarrier>T</clEnqueueBarrier>
+                    <clCreateFromGLBuffer>T</clCreateFromGLBuffer>
+                    <clCreateFromGLTexture2D>T</clCreateFromGLTexture2D>
+                    <clCreateFromGLTexture3D>T</clCreateFromGLTexture3D>
+                    <clCreateFromGLRenderbuffer>T</clCreateFromGLRenderbuffer>
+                    <clGetGLObjectInfo>T</clGetGLObjectInfo>
+                    <clGetGLTextureInfo>T</clGetGLTextureInfo>
+                    <clCreateEventFromGLsyncKHR>T</clCreateEventFromGLsyncKHR>
+                    <clGetGLContextInfoKHR>T</clGetGLContextInfoKHR>
+                    <clCreateSubDevicesEXT>T</clCreateSubDevicesEXT>
+                    <clRetainDeviceEXT>T</clRetainDeviceEXT>
+                    <clReleaseDeviceEXT>T</clReleaseDeviceEXT>
+                    <clGetDeviceIDsFromD3D10KHR>T</clGetDeviceIDsFromD3D10KHR>
+                    <clCreateFromD3D10BufferKHR>T</clCreateFromD3D10BufferKHR>
+                    <clCreateFromD3D10Texture2DKHR>T</clCreateFromD3D10Texture2DKHR>
+                    <clCreateFromD3D10Texture3DKHR>T</clCreateFromD3D10Texture3DKHR>
+                    <clSetCommandQueueProperty>T</clSetCommandQueueProperty>
+                    <clCreateSubDevices>T</clCreateSubDevices>
+                    <clRetainDevice>T</clRetainDevice>
+                    <clReleaseDevice>T</clReleaseDevice>
+                    <clCreateImage>T</clCreateImage>
+                    <clCreateProgramWithBuiltInKernels>T</clCreateProgramWithBuiltInKernels>
+                    <clCompileProgram>T</clCompileProgram>
+                    <clLinkProgram>T</clLinkProgram>
+                    <clUnloadPlatformCompiler>T</clUnloadPlatformCompiler>
+                    <clGetKernelArgInfo>T</clGetKernelArgInfo>
+                    <clEnqueueFillBuffer>T</clEnqueueFillBuffer>
+                    <clEnqueueFillImage>T</clEnqueueFillImage>
+                    <clEnqueueMigrateMemObjects>T</clEnqueueMigrateMemObjects>
+                    <clEnqueueMarkerWithWaitList>T</clEnqueueMarkerWithWaitList>
+                    <clEnqueueBarrierWithWaitList>T</clEnqueueBarrierWithWaitList>
+                    <clGetExtensionFunctionAddressForPlatform>T</clGetExtensionFunctionAddressForPlatform>
+                    <clCreateFromGLTexture>T</clCreateFromGLTexture>
+                    <clGetExtensionFunctionAddress>T</clGetExtensionFunctionAddress>
+                    <clCreateCommandQueueWithProperties>T</clCreateCommandQueueWithProperties>
+                    <clCreatePipe>T</clCreatePipe>
+                    <clGetPipeInfo>T</clGetPipeInfo>
+                    <clSVMAlloc>T</clSVMAlloc>
+                    <clSVMFree>T</clSVMFree>
+                    <clEnqueueSVMFree>T</clEnqueueSVMFree>
+                    <clEnqueueSVMMemcpy>T</clEnqueueSVMMemcpy>
+                    <clEnqueueSVMMemFill>T</clEnqueueSVMMemFill>
+                    <clEnqueueSVMMap>T</clEnqueueSVMMap>
+                    <clEnqueueSVMUnmap>T</clEnqueueSVMUnmap>
+                    <clCreateSamplerWithProperties>T</clCreateSamplerWithProperties>
+                    <clSetKernelArgSVMPointer>T</clSetKernelArgSVMPointer>
+                    <clSetKernelExecInfo>T</clSetKernelExecInfo>
+                    <clSVMAllocAMD>T</clSVMAllocAMD>
+                    <clSVMFreeAMD>T</clSVMFreeAMD>
+                    <clEnqueueSVMFreeAMD>T</clEnqueueSVMFreeAMD>
+                    <clEnqueueSVMMemcpyAMD>T</clEnqueueSVMMemcpyAMD>
+                    <clEnqueueSVMMemFillAMD>T</clEnqueueSVMMemFillAMD>
+                    <clEnqueueSVMMapAMD>T</clEnqueueSVMMapAMD>
+                    <clEnqueueSVMUnmapAMD>T</clEnqueueSVMUnmapAMD>
+                    <clSetKernelArgSVMPointerAMD>T</clSetKernelArgSVMPointerAMD>
+                    <clSetKernelExecInfoAMD>T</clSetKernelExecInfoAMD>
+                    <clCreateSsgFileObjectAMD>T</clCreateSsgFileObjectAMD>
+                    <clGetSsgFileObjectInfoAMD>T</clGetSsgFileObjectInfoAMD>
+                    <clRetainSsgFileObjectAMD>T</clRetainSsgFileObjectAMD>
+                    <clReleaseSsgFileObjectAMD>T</clReleaseSsgFileObjectAMD>
+                    <clEnqueueReadSsgFileAMD>T</clEnqueueReadSsgFileAMD>
+                    <clEnqueueWriteSsgFileAMD>T</clEnqueueWriteSsgFileAMD>
+                    <clCloneKernel>T</clCloneKernel>
+                    <clCreateProgramWithIL>T</clCreateProgramWithIL>
+                    <clEnqueueSVMMigrateMem>T</clEnqueueSVMMigrateMem>
+                    <clGetDeviceAndHostTimer>T</clGetDeviceAndHostTimer>
+                    <clGetHostTimer>T</clGetHostTimer>
+                    <clGetKernelSubGroupInfo>T</clGetKernelSubGroupInfo>
+                    <clSetDefaultDeviceCommandQueue>T</clSetDefaultDeviceCommandQueue>
+                    <clSetProgramReleaseCallback>T</clSetProgramReleaseCallback>
+                    <clSetProgramSpecializationConstant>T</clSetProgramSpecializationConstant>
+                    <>T
+                </APIsFilterTree>
+            </Session>
+        </OpenCLAppTrace>
+        <GPUPerformanceCounters>
+            <Session type="Current">
+                <APIType>OpenCL</APIType>
+                <IsRemoteSession>F</IsRemoteSession>
+                <GenerateOccupancyInfo>T</GenerateOccupancyInfo>
+                <GpuTimeCollect>T</GpuTimeCollect>
+                <ProfileSpecificKernels />
+                <CallXInitThreads>F</CallXInitThreads>
+                <CounterTree>
+                    <CacheHit>T</CacheHit>
+                    <FetchSize>T</FetchSize>
+                    <FlatLDSInsts>T</FlatLDSInsts>
+                    <FlatVMemInsts>T</FlatVMemInsts>
+                    <GDSInsts>T</GDSInsts>
+                    <L1CacheHit>T</L1CacheHit>
+                    <L2CacheHit>T</L2CacheHit>
+                    <LDSBankConflict>T</LDSBankConflict>
+                    <LDSInsts>T</LDSInsts>
+                    <MemUnitBusy>T</MemUnitBusy>
+                    <MemUnitStalled>T</MemUnitStalled>
+                    <SALUBusy>T</SALUBusy>
+                    <SALUInsts>T</SALUInsts>
+                    <SFetchInsts>T</SFetchInsts>
+                    <VALUBusy>T</VALUBusy>
+                    <VALUInsts>T</VALUInsts>
+                    <VALUUtilization>T</VALUUtilization>
+                    <VFetchInsts>T</VFetchInsts>
+                    <VWriteInsts>T</VWriteInsts>
+                    <Wavefronts>T</Wavefronts>
+                    <WriteSize>T</WriteSize>
+                    <WriteUnitStalled>T</WriteUnitStalled>
+                </CounterTree>
+            </Session>
+        </GPUPerformanceCounters>
+        <KernelAnalyzer>
+            <ProjectArchitecture>32-bit GPU Build​</ProjectArchitecture>
+            <FilesSection>
+                <FileInfo>
+                    <SourceFileId>0</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\atomic.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>1</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\camera.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>2</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\debug.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>3</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\extension_ray_cast.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>4</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\intersect_triangle.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>5</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\lambertian.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>6</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\logic.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>7</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\new_path.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>8</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\peseudo_random.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>9</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\slab.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+                <FileInfo>
+                    <SourceFileId>10</SourceFileId>
+                    <FilePath>c:\users\ushio\documents\raytracing\of_v0.10.1_vs2017_release\apps\raccoongpurender\kernels\types.cl</FilePath>
+                    <FileType>-1</FileType>
+                    <ExecutionPath />
+                    <ExecutionDevices />
+                    <ShaderPlatform>OpenCL</ShaderPlatform>
+                    <ShaderProfile />
+                    <ShaderEntryPoint />
+                    <ShaderGLType />
+                </FileInfo>
+            </FilesSection>
+            <ProgramSection />
+            <BuildOptions />
+            <ShaderCompileType>D3D</ShaderCompileType>
+            <ShaderBuildOptions />
+            <ShaderD3dBuilderPath>D3DCompiler_47.dll (bundled with CodeXL)</ShaderD3dBuilderPath>
+            <ShaderFxcBuilderPath>Browse...</ShaderFxcBuilderPath>
+            <ShaderMacros />
+            <ShaderIncludes />
+            <KernelMacros />
+            <EnableD3D11ShaderIntrinsics>false</EnableD3D11ShaderIntrinsics>
+        </KernelAnalyzer>
+        <KernelAnalyzerOther />
+        <ShaderAnalyzer />
+    </ProductExtensions>
+</CodeXL>

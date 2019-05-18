@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include <memory>
+#include <functional>
+#include <future>
 #include <glm/glm.hpp>
 #include "raccoon_ocl.hpp"
 #include "threaded_bvh.hpp"
@@ -14,14 +16,14 @@
 */
 
 namespace rt {
-	static const uint32_t kWavefrontPathCount = 1 << 20; /* 2^20 */
+	static const uint32_t kWavefrontPathCount = 1 << 24; /* 2^24 */
 
 	struct WavefrontPath {
 		OpenCLFloat3 T;
 		OpenCLFloat3 L;
 		OpenCLFloat3 ro;
 		OpenCLFloat3 rd;
-		uint32_t depth;
+		uint32_t logic_i;
 		uint32_t pixel_index;
 	};
 	struct StandardCamera {
@@ -33,6 +35,11 @@ namespace rt {
 		OpenCLFloat3 imageplane_r;
 		OpenCLFloat3 imageplane_b;
 		OpenCLUInt2 image_size;
+	};
+
+	struct ShadingResult {
+		OpenCLFloat3 Le;
+		OpenCLFloat3 T;
 	};
 
 	struct ExtensionResult {
@@ -129,103 +136,169 @@ namespace rt {
 		return c;
 	}
 
+	class EventQueue {
+	public:
+		EventQueue() {
+
+		}
+		void add(std::shared_ptr<OpenCLEvent> e) {
+			_queue.push(e);
+			if (_maxItem < _queue.size()) {
+				auto front = _queue.front();
+				front->wait();
+				_queue.pop();
+			}
+		}
+		void operator+=(std::shared_ptr<OpenCLEvent> e) {
+			add(e);
+		}
+		std::queue<std::shared_ptr<OpenCLEvent>> _queue;
+		int _maxItem = 64;
+	};
+
 	class WavefrontLane {
 	public:
 		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager):_lane(lane), _camera(camera) {
-			_program_random = unique(new OpenCLProgram("peseudo_random.cl", lane.context, lane.device_id));
-			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", _program_random->program()));
+			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
+			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
 
-			_program_new_path = unique(new OpenCLProgram("new_path.cl", lane.context, lane.device_id));
-			_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", _program_new_path->program()));
-			_kernel_new_path = unique(new OpenCLKernel("new_path", _program_new_path->program()));
-			_kernel_advance_next_pixel_index = unique(new OpenCLKernel("advance_next_pixel_index", _program_new_path->program()));
+			OpenCLProgram program_new_path("new_path.cl", lane.context, lane.device_id);
+			_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", program_new_path.program()));
+			_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
+			_kernel_finalize_new_path = unique(new OpenCLKernel("finalize_new_path", program_new_path.program()));
 
-			_program_extension_ray_cast = unique(new OpenCLProgram("extension_ray_cast.cl", lane.context, lane.device_id));
-			_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", _program_extension_ray_cast->program()));
+			OpenCLProgram program_extension_ray_cast("extension_ray_cast.cl", lane.context, lane.device_id);
+			_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", program_extension_ray_cast.program()));
 
-			_program_debug = unique(new OpenCLProgram("debug.cl", lane.context, lane.device_id));
-			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", _program_debug->program()));
-			_kernel_RGB24Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_linear", _program_debug->program()));
+			OpenCLProgram program_logic("logic.cl", lane.context, lane.device_id);
+			_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
+
+			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
+			_kernel_lambertian = unique(new OpenCLKernel("lambertian", program_lambertian.program()));
+			_kernel_finalize_lambertian = unique(new OpenCLKernel("finalize_lambertian", program_lambertian.program()));
+			
+			OpenCLProgram program_debug("debug.cl", lane.context, lane.device_id);
+			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_debug.program()));
+			_kernel_RGB24Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_linear", program_debug.program()));
+			_kernel_RGB24Accumulation_to_RGBA8_tonemap_simplest = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_tonemap_simplest", program_debug.program()));
+			
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, kWavefrontPathCount));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, kWavefrontPathCount));
 
-			uint64_t kZero = 0;
-			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero, 1));
+			uint64_t kZero64 = 0;
+			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1));
 
 			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, kWavefrontPathCount));
 
+			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, kWavefrontPathCount));
+
+			uint32_t kZero32 = 0;
 			_queue_new_path_item = unique(new OpenCLBuffer<uint32_t>(lane.context, kWavefrontPathCount));
-			_queue_new_path_count = unique(new OpenCLBuffer<uint32_t>(lane.context, 1));
+			_queue_new_path_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1));
+			_queue_lambertian_item = unique(new OpenCLBuffer<uint32_t>(lane.context, kWavefrontPathCount));
+			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1));
 
 			// accumlation
+			_ac_color = unique(new OpenCLBuffer<RGB24AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y));
 			_ac_normal = unique(new OpenCLBuffer<RGB24AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y));
+			_image_color = unique(new OpenCLBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
 			_image_normal = unique(new OpenCLBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 		}
 
-		std::shared_ptr<OpenCLEvent> initialize(int lane_index) {
+		void initialize(int lane_index) {
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
 			_kernel_random_initialize->setArgument(1, lane_index * kWavefrontPathCount);
-			_kernel_random_initialize->launch(_lane.queue, 0, kWavefrontPathCount);
+			_eventQueue += _kernel_random_initialize->launch(_lane.queue, 0, kWavefrontPathCount);
 
 			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path_item->memory());
 			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path_count->memory());
-			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+			_eventQueue += _kernel_initialize_all_as_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+		}
 
-			int new_path_arg = 0;
-			_kernel_new_path->setArgument(new_path_arg++, _queue_new_path_item->memory());
-			_kernel_new_path->setArgument(new_path_arg++, _queue_new_path_count->memory());
-			_kernel_new_path->setArgument(new_path_arg++, _mem_path->memory());
-			_kernel_new_path->setArgument(new_path_arg++, _mem_random_state->memory());
-			_kernel_new_path->setArgument(new_path_arg++, _mem_next_pixel_index->memory());
-			_kernel_new_path->setArgument(new_path_arg++, standardCamera(_camera));
-			_kernel_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
-			// auto eventNewPath = 
-			//auto elapsedNewPath = eventNewPath->wait();
-			//printf("new path: %f ms\n", elapsedNewPath);
+		void step() {
+			{
+				int arg = 0;
+				_kernel_new_path->setArgument(arg++, _queue_new_path_item->memory());
+				_kernel_new_path->setArgument(arg++, _queue_new_path_count->memory());
+				_kernel_new_path->setArgument(arg++, _mem_path->memory());
+				_kernel_new_path->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_new_path->setArgument(arg++, _mem_random_state->memory());
+				_kernel_new_path->setArgument(arg++, _mem_next_pixel_index->memory());
+				_kernel_new_path->setArgument(arg++, standardCamera(_camera));
+				_eventQueue += _kernel_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
 
-			// インクリメント
-			_kernel_advance_next_pixel_index->setArgument(0, _mem_next_pixel_index->memory());
-			_kernel_advance_next_pixel_index->setArgument(1, _queue_new_path_count->memory());
-			_kernel_advance_next_pixel_index->launch(_lane.queue, 0, 1);
+				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
+				_kernel_finalize_new_path->setArgument(1, _queue_new_path_count->memory());
+				_eventQueue += _kernel_finalize_new_path->launch(_lane.queue, 0, 1);
+			}
+			{
+				int arg = 0;
+				_kernel_lambertian->setArgument(arg++, _mem_path->memory());
+				_kernel_lambertian->setArgument(arg++, _mem_random_state->memory());
+				_kernel_lambertian->setArgument(arg++, _mem_extension_results->memory());
+				_kernel_lambertian->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_lambertian->setArgument(arg++, _queue_lambertian_item->memory());
+				_kernel_lambertian->setArgument(arg++, _queue_lambertian_count->memory());
+				_eventQueue += _kernel_lambertian->launch(_lane.queue, 0, kWavefrontPathCount);
 
-			int extension_ray_cast_arg = 0;
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _mem_path->memory());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _mem_extension_results->memory());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _sceneBuffer->mtvbhCL->memory());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _sceneBuffer->mtvbhCL->size());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _sceneBuffer->linksCL->memory());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _sceneBuffer->primitive_indicesCL->memory());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _sceneBuffer->indicesCL->memory());
-			_kernel_extension_ray_cast->setArgument(extension_ray_cast_arg++, _sceneBuffer->pointsCL->memory());
-			auto eventExtension = _kernel_extension_ray_cast->launch(_lane.queue, 0, kWavefrontPathCount);
-			auto elapsedExtension = eventExtension->wait();
-			printf("extension_ray_cast: %f ms\n", elapsedExtension);
+				_kernel_finalize_lambertian->setArgument(0, _queue_lambertian_count->memory());
+				_eventQueue += _kernel_finalize_lambertian->launch(_lane.queue, 0, 1);
+			}
 
-			_kernel_visualize_intersect_normal->setArgument(0, _mem_path->memory());
-			_kernel_visualize_intersect_normal->setArgument(1, _mem_extension_results->memory());
-			_kernel_visualize_intersect_normal->setArgument(2, _ac_normal->memory());
-			_kernel_visualize_intersect_normal->launch(_lane.queue, 0, kWavefrontPathCount);
+			{
+				int arg = 0;
+				_kernel_extension_ray_cast->setArgument(arg++, _mem_path->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _mem_extension_results->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->mtvbhCL->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->mtvbhCL->size());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->linksCL->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_indicesCL->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
+				_eventQueue += _kernel_extension_ray_cast->launch(_lane.queue, 0, kWavefrontPathCount);
+			}
 
-			_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(0, _ac_normal->memory());
-			_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(1, _image_normal->memory());
-			_kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
+			{
+				int arg = 0;
+				_kernel_logic->setArgument(arg++, _mem_path->memory());
+				_kernel_logic->setArgument(arg++, _mem_random_state->memory());
+				_kernel_logic->setArgument(arg++, _mem_extension_results->memory());
+				_kernel_logic->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_logic->setArgument(arg++, _ac_color->memory());
+				_kernel_logic->setArgument(arg++, _ac_normal->memory());
+				_kernel_logic->setArgument(arg++, _queue_new_path_item->memory());
+				_kernel_logic->setArgument(arg++, _queue_new_path_count->memory());
+				_kernel_logic->setArgument(arg++, _queue_lambertian_item->memory());
+				_kernel_logic->setArgument(arg++, _queue_lambertian_count->memory());
+				_eventQueue += _kernel_logic->launch(_lane.queue, 0, kWavefrontPathCount);
+			}
 
-			std::vector<WavefrontPath> wavefrontPath(kWavefrontPathCount);
-			_mem_path->readImmediately(wavefrontPath.data(), _lane.queue);
+			{
+				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(0, _ac_color->memory());
+				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(1, _image_color->memory());
+				_eventQueue += _kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
+			}
+			{
+				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(0, _ac_normal->memory());
+				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(1, _image_normal->memory());
+				_eventQueue += _kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
+			}
 
-			uint64_t next_pixel_index;
-			_mem_next_pixel_index->readImmediately(&next_pixel_index, _lane.queue);
-
-			RGBA8Image2D image2d;
-			image2d.resize(_camera->resolution_x, _camera->resolution_y);
-			_image_normal->readImmediately(image2d.data(), _lane.queue);
-
-			ofImage image;
-			image.setFromPixels(image2d.data_u8(), image2d.width(), image2d.height(), OF_IMAGE_COLOR_ALPHA);
-			image.save("normal.png");
-			return std::shared_ptr<OpenCLEvent>();
+			if (_colorMapEvent) {
+				if (_colorMapEvent->is_done()) {
+					if (onColorImageReceived) {
+						onColorImageReceived(_colorMapPtr, _camera->resolution_x, _camera->resolution_y);
+					}
+					_image_color->unmap(_colorMapPtr, _lane.queue);
+					_colorMapEvent = std::shared_ptr<OpenCLEvent>();
+				}
+			}
+			else {
+				_colorMapEvent = _image_color->map_readonly(&_colorMapPtr, _lane.queue);
+				_eventQueue += _colorMapEvent;
+			}
 		}
 
 		OpenCLLane _lane;
@@ -234,35 +307,50 @@ namespace rt {
 		std::unique_ptr<SceneBuffer> _sceneBuffer;
 
 		// kernels
-		std::unique_ptr<OpenCLProgram> _program_random;
 		std::unique_ptr<OpenCLKernel> _kernel_random_initialize;
 
-		std::unique_ptr<OpenCLProgram> _program_new_path;
 		std::unique_ptr<OpenCLKernel> _kernel_initialize_all_as_new_path;
 		std::unique_ptr<OpenCLKernel> _kernel_new_path;
-		std::unique_ptr<OpenCLKernel> _kernel_advance_next_pixel_index;
+		std::unique_ptr<OpenCLKernel> _kernel_finalize_new_path;
 
-		std::unique_ptr<OpenCLProgram> _program_extension_ray_cast;
 		std::unique_ptr<OpenCLKernel> _kernel_extension_ray_cast;
 
-		std::unique_ptr<OpenCLProgram> _program_debug;
+		std::unique_ptr<OpenCLKernel> _kernel_logic;
+
+		std::unique_ptr<OpenCLKernel> _kernel_lambertian;
+		std::unique_ptr<OpenCLKernel> _kernel_finalize_lambertian;
+
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB24Accumulation_to_RGBA8_linear;
+		std::unique_ptr<OpenCLKernel> _kernel_RGB24Accumulation_to_RGBA8_tonemap_simplest;
 
+		// buffers
 		std::unique_ptr<OpenCLBuffer<glm::uvec4>> _mem_random_state;
 		std::unique_ptr<OpenCLBuffer<WavefrontPath>> _mem_path;
 		std::unique_ptr<OpenCLBuffer<uint64_t>>      _mem_next_pixel_index;
 		std::unique_ptr<OpenCLBuffer<ExtensionResult>> _mem_extension_results;
+		std::unique_ptr<OpenCLBuffer<ShadingResult>> _mem_shading_results;
 
 		// queues
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_new_path_item;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_new_path_count;
+		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_item;
+		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_count;
 
 		// Accumlation Buffer
+		std::unique_ptr<OpenCLBuffer<RGB24AccumulationValueType>> _ac_color;
 		std::unique_ptr<OpenCLBuffer<RGB24AccumulationValueType>> _ac_normal;
 
 		// Image Object
+		std::unique_ptr<OpenCLBuffer<RGBA8ValueType>> _image_color;
 		std::unique_ptr<OpenCLBuffer<RGBA8ValueType>> _image_normal;
+
+		// event
+		std::shared_ptr<OpenCLEvent> _colorMapEvent;
+		RGBA8ValueType *_colorMapPtr = nullptr;
+		std::function<void(RGBA8ValueType *, int, int)> onColorImageReceived;
+
+		EventQueue _eventQueue;
 	};
 
 	class WavefrontPathTracing {
@@ -292,11 +380,6 @@ namespace rt {
 			auto lane = context->lane(0);
 			_wavefrontLane = unique(new WavefrontLane(lane, _camera, _sceneManager));
 			_wavefrontLane->initialize(0);
-
-			//uint32_t count;
-			//_wavefrontLane->_queue_new_path_count->readImmediately(&count, lane.queue);
-			//std::vector<uint32_t> items(kWavefrontPathCount);
-			//_wavefrontLane->_queue_new_path_item->readImmediately(items.data(), lane.queue);
 		}
 		OpenCLContext *_context;
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;

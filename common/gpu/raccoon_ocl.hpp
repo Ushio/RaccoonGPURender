@@ -170,11 +170,14 @@ namespace rt {
 			double delta_ms = delta_time_nano * 0.001 * 0.001;
 			return delta_ms;
 		}
-		cl_int status() {
+		cl_int status() const {
 			cl_int s;
 			cl_int r = clGetEventInfo(_event.get(), CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(s), &s, nullptr);
 			REQUIRE_OR_EXCEPTION(r == CL_SUCCESS, "clGetEventInfo() failed");
 			return s;
+		}
+		bool is_done() const {
+			return status() == CL_COMPLETE;
 		}
 	private:
 		bool _waited = false;
@@ -208,7 +211,7 @@ namespace rt {
 			return _memory.get();
 		}
 
-		std::shared_ptr<OpenCLEvent> map(T **value, cl_command_queue queue) {
+		std::shared_ptr<OpenCLEvent> map_readonly(T **value, cl_command_queue queue) {
 			cl_event read_event;
 			cl_int status;
 			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &read_event, &status);
@@ -222,7 +225,7 @@ namespace rt {
 
 		void readImmediately(T *value, cl_command_queue queue) {
 			T *p_gpu;
-			auto map_event = map(&p_gpu, queue);
+			auto map_event = map_readonly(&p_gpu, queue);
 			map_event->wait();
 			std::copy(p_gpu, p_gpu + _length, value);
 			unmap(p_gpu, queue);

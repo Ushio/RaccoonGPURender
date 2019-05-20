@@ -73,17 +73,18 @@ void ofApp::setup() {
 	}
 
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
-	pt->_wavefrontLane->colorReciever = &colorReciever;
-	pt->_wavefrontLane->normalReciever = &normalReciever;
+	pt->_wavefront_lanes[0]->colorReciever = &colorReciever;
+	// pt->_wavefront_lanes[0]->normalReciever = &normalReciever;
 	
 }
 void ofApp::exit() {
+	delete pt;
 	ofxRaccoonImGui::shutdown();
 }
 
 //--------------------------------------------------------------
 void ofApp::update() {
-
+	pt->pump();
 }
 
 //--------------------------------------------------------------
@@ -112,7 +113,7 @@ void ofApp::draw() {
 
 	//static std::vector<WavefrontPath> wavefrontPath(kWavefrontPathCount);
 	//auto wavefrontLane = pt->_wavefrontLane.get();
-	//wavefrontLane->_mem_path->readImmediately(wavefrontPath.data(), wavefrontLane->_lane.queue);
+	//wavefrontLane->_mem_path->read_immediately(wavefrontPath.data(), wavefrontLane->_lane.queue);
 
 	//ofSetColor(255);
 	//for (int i = 0; i < 60 * 80; ++i) {

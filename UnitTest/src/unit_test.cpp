@@ -52,12 +52,12 @@ TEST_CASE("Random") {
 		OpenCLBuffer<float> value_gpu(lane.context, N);
 		std::vector<float> value(N);
 		for (int i = 0; i < 10; ++i) {
-			state_gpu.readImmediately(state.data(), lane.queue);
+			state_gpu.read_immediately(state.data(), lane.queue);
 
 			kernel.setArgument(0, state_gpu.memory());
 			kernel.setArgument(1, value_gpu.memory());
 			kernel.launch(lane.queue, 0, N);
-			value_gpu.readImmediately(value.data(), lane.queue);
+			value_gpu.read_immediately(value.data(), lane.queue);
 
 			for (int j = 0; j < N; ++j) {
 				Xoshiro128StarStar random(state[j].x, state[j].y, state[j].z, state[j].w);
@@ -94,8 +94,8 @@ TEST_CASE("Atomic") {
 			kernel.setArgument(1, sum_f_gpu.memory());
 			kernel.launch(lane.queue, 0, N);
 
-			sum_i_gpu.readImmediately(&sum_i, lane.queue);
-			sum_f_gpu.readImmediately(&sum_f, lane.queue);
+			sum_i_gpu.read_immediately(&sum_i, lane.queue);
+			sum_f_gpu.read_immediately(&sum_f, lane.queue);
 			REQUIRE(sum_i == N);
 			REQUIRE((int)sum_f == N);
 		}
@@ -107,7 +107,7 @@ TEST_CASE("Atomic") {
 			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
 			kernel.setArgument(0, sum_f_gpu.memory());
 			kernel.launch(lane.queue, 0, N);
-			sum_f_gpu.readImmediately(&sum_f, lane.queue);
+			sum_f_gpu.read_immediately(&sum_f, lane.queue);
 			REQUIRE((int)sum_f == N);
 		}
 	}
@@ -141,8 +141,8 @@ TEST_CASE("Simple Queue") {
 			// printf("[%s] queue_simple kernel %f ms\n", device_name.c_str(), kernel_event->wait());
 
 			std::vector<int32_t> queue_value(N);
-			queue_next_index_gpu.readImmediately(&queue_next_index, lane.queue);
-			queue_value_gpu.readImmediately(queue_value.data(), lane.queue);
+			queue_next_index_gpu.read_immediately(&queue_next_index, lane.queue);
+			queue_value_gpu.read_immediately(queue_value.data(), lane.queue);
 
 			int queue_count = queue_next_index;
 			for (int i = 0; i < queue_count; ++i) {
@@ -163,8 +163,8 @@ TEST_CASE("Simple Queue") {
 			// printf("[%s] queue_use_local kernel %f ms\n", device_name.c_str(), kernel_event->wait());
 
 			std::vector<int32_t> queue_value(N);
-			queue_next_index_gpu.readImmediately(&queue_next_index, lane.queue);
-			queue_value_gpu.readImmediately(queue_value.data(), lane.queue);
+			queue_next_index_gpu.read_immediately(&queue_next_index, lane.queue);
+			queue_value_gpu.read_immediately(queue_value.data(), lane.queue);
 
 			int queue_count = queue_next_index;
 			for (int i = 0; i < queue_count; ++i) {
@@ -295,7 +295,7 @@ TEST_CASE("AABB") {
 				kernel.launch(lane.queue, 0, ros.size());
 
 				std::vector<int32_t> results(ros.size());
-				results_gpu.readImmediately(results.data(), lane.queue);
+				results_gpu.read_immediately(results.data(), lane.queue);
 
 				for (int i = 0; i < results.size(); ++i) {
 					REQUIRE(results[i] == 1);

@@ -64,6 +64,7 @@ __kernel void logic(
         wavefrontPath[gid].L += wavefrontPath[gid].T * emission;
     }
 
+    // debug normal
     if(logic_i == 0) {
         float3 color;
         if(material_id < 0) {

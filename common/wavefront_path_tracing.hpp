@@ -4,12 +4,12 @@
 #include <functional>
 #include <future>
 #include <glm/glm.hpp>
-#include <tbb/concurrent_queue.h>
 #include "raccoon_ocl.hpp"
 #include "threaded_bvh.hpp"
 #include "peseudo_random.hpp"
 #include "houdini_alembic.hpp"
 #include "scene_manager.hpp"
+#include "stopwatch.hpp"
 
 namespace rt {
 	static const uint32_t kWavefrontPathCount = 1 << 24; /* 2^24 */
@@ -80,16 +80,20 @@ namespace rt {
 		int _height = 0;
 		std::vector<ValueType> _values;
 	};
-	struct alignas(16) RGB24AccumulationValueType {
+
+	// 32bit compornent RGB Accumlation
+	struct alignas(16) RGB32AccumulationValueType {
 		float r = 0.0f;
 		float g = 0.0f;
 		float b = 0.0f;
 		float sampleCount = 0.0f;
 	};
-	class RGB24AccumulationImage2D : public TImage2D<RGB24AccumulationValueType> {
+	class RGB24AccumulationImage2D : public TImage2D<RGB32AccumulationValueType> {
 	public:
 		
 	};
+
+	// 8bit compornent RGBA
 	struct alignas(4) RGBA8ValueType {
 		uint8_t r;
 		uint8_t g;
@@ -132,6 +136,59 @@ namespace rt {
 		return c;
 	}
 
+	class TaskItem {
+	public:
+		virtual ~TaskItem() {}
+		virtual void update() = 0;
+		virtual bool is_completed() const = 0;
+	};
+
+	class NullTaskItem : public TaskItem {
+		void update() override {
+
+		}
+		bool is_completed() const override {
+			return true;
+		}
+	};
+
+	class EventTaskItem : public TaskItem {
+	public:
+		EventTaskItem(std::shared_ptr<OpenCLEvent> e):_e(e) {
+			
+		}
+		void update() override {
+			// NOP
+		}
+		bool is_completed() const override {
+			return _e->is_completed();
+		}
+	private:
+		std::shared_ptr<OpenCLEvent> _e;
+	};
+	inline std::shared_ptr<EventTaskItem> task_from_event(std::shared_ptr<OpenCLEvent> e) {
+		return std::shared_ptr<EventTaskItem>(new EventTaskItem(e));
+	}
+
+	class TaskPostProcesser : public TaskItem {
+	public:
+		TaskPostProcesser(std::shared_ptr<TaskItem> item, std::function<void(void)> f):_item(item), _f(f) {
+		}
+		void update() override {
+			if (_is_completed == false && _item->is_completed()) {
+				_f();
+				_is_completed = true;
+			}
+		}
+		bool is_completed() const override {
+			return _is_completed;
+		}
+	private:
+		std::shared_ptr<TaskItem> _item;
+		bool _is_completed = false;
+		std::function<void(void)> _f;
+	};
+
 	class EventQueue {
 	public:
 		EventQueue() {
@@ -156,58 +213,6 @@ namespace rt {
 	public:
 		virtual void set_image(RGBA8ValueType *p, int w, int h) = 0;
 	};
-
-	class WorkerThread {
-	public:
-		WorkerThread() {
-			_continue = true;
-			_thread = std::thread([&](){
-				while(_continue) {
-					std::function<void(void)> item;
-					if (_items.try_pop(item)) {
-						item();
-					}
-					else {
-						std::this_thread::sleep_for(std::chrono::nanoseconds(1));
-					}
-				}
-			});
-		}
-		~WorkerThread() {
-			_continue = false;
-			_thread.join();
-
-			for (auto it = _items.unsafe_begin(); it != _items.unsafe_end(); ++it) {
-				(*it)();
-			}
-		}
-
-		void run(std::function<void(void)> item) {
-			_items.push(item);
-		}
-		std::atomic<bool> _continue;
-		std::thread _thread;
-		tbb::concurrent_queue<std::function<void(void)>> _items;
-	};
-
-	inline void transfer_image(WorkerThread &group, OpenCLBuffer<RGBA8ValueType> *buffer, cl_command_queue queue, IImageReciever *reciever, int w, int h) {
-		if (reciever == nullptr) {
-			return;
-		}
-
-		typedef RGBA8ValueType *RGBA8ValueTypePtr;
-		std::shared_ptr<RGBA8ValueTypePtr> mapPtr(new RGBA8ValueTypePtr);
-
-		// fire task but wait at worker thread. 
-		// あとなぜかmapを違うスレッドから実行すると、データコピー時にアイドルが発生する。
-		auto mapEvent = buffer->map_readonly(mapPtr.get(), queue);
-
-		group.run([=]() {
-			mapEvent->wait();
-			reciever->set_image(*mapPtr, w, h);
-			buffer->unmap(*mapPtr, queue);
-		});
-	}
 
 	class WavefrontLane {
 	public:
@@ -253,10 +258,10 @@ namespace rt {
 			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1));
 
 			// accumlation
-			_ac_color = unique(new OpenCLBuffer<RGB24AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y));
-			_ac_normal = unique(new OpenCLBuffer<RGB24AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y));
-			_image_color = unique(new OpenCLBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
-			_image_normal = unique(new OpenCLBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
+			_ac_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y));
+			_ac_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y));
+			_image_color = unique(new OpenCLReentrantSafePinnedBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
+			_image_normal = unique(new OpenCLReentrantSafePinnedBuffer<RGBA8ValueType>(lane.context, camera->resolution_x * camera->resolution_y));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 		}
@@ -267,15 +272,19 @@ namespace rt {
 		void initialize(int lane_index) {
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
 			_kernel_random_initialize->setArgument(1, lane_index * kWavefrontPathCount);
-			_eventQueue += _kernel_random_initialize->launch(_lane.queue, 0, kWavefrontPathCount);
+			_kernel_random_initialize->launch(_lane.queue, 0, kWavefrontPathCount);
 
 			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path_item->memory());
 			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path_count->memory());
-			_eventQueue += _kernel_initialize_all_as_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
 		}
 
-		void step() {
-			{
+		std::shared_ptr<TaskItem> fireNextTask() {
+			std::shared_ptr<TaskItem> r;
+
+			constexpr int BASE = __COUNTER__ + 1;
+			switch (_stage) {
+			case (__COUNTER__ - BASE): {
 				int arg = 0;
 				_kernel_new_path->setArgument(arg++, _queue_new_path_item->memory());
 				_kernel_new_path->setArgument(arg++, _queue_new_path_count->memory());
@@ -284,13 +293,14 @@ namespace rt {
 				_kernel_new_path->setArgument(arg++, _mem_random_state->memory());
 				_kernel_new_path->setArgument(arg++, _mem_next_pixel_index->memory());
 				_kernel_new_path->setArgument(arg++, standardCamera(_camera));
-				_eventQueue += _kernel_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+				_kernel_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
 
 				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
 				_kernel_finalize_new_path->setArgument(1, _queue_new_path_count->memory());
-				_eventQueue += _kernel_finalize_new_path->launch(_lane.queue, 0, 1);
+				r = task_from_event(_kernel_finalize_new_path->launch(_lane.queue, 0, 1));
+				break;
 			}
-			{
+			case (__COUNTER__ - BASE): {
 				int arg = 0;
 				_kernel_lambertian->setArgument(arg++, _mem_path->memory());
 				_kernel_lambertian->setArgument(arg++, _mem_random_state->memory());
@@ -298,13 +308,13 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _mem_shading_results->memory());
 				_kernel_lambertian->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_lambertian->setArgument(arg++, _queue_lambertian_count->memory());
-				_eventQueue += _kernel_lambertian->launch(_lane.queue, 0, kWavefrontPathCount);
+				_kernel_lambertian->launch(_lane.queue, 0, kWavefrontPathCount);
 
 				_kernel_finalize_lambertian->setArgument(0, _queue_lambertian_count->memory());
-				_eventQueue += _kernel_finalize_lambertian->launch(_lane.queue, 0, 1);
+				r = task_from_event(_kernel_finalize_lambertian->launch(_lane.queue, 0, 1));
+				break;
 			}
-
-			{
+			case (__COUNTER__ - BASE): {
 				int arg = 0;
 				_kernel_extension_ray_cast->setArgument(arg++, _mem_path->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _mem_extension_results->memory());
@@ -314,10 +324,10 @@ namespace rt {
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
-				_eventQueue += _kernel_extension_ray_cast->launch(_lane.queue, 0, kWavefrontPathCount);
+				r = task_from_event(_kernel_extension_ray_cast->launch(_lane.queue, 0, kWavefrontPathCount));
+				break;
 			}
-
-			{
+			case (__COUNTER__ - BASE): {
 				int arg = 0;
 				_kernel_logic->setArgument(arg++, _mem_path->memory());
 				_kernel_logic->setArgument(arg++, _mem_random_state->memory());
@@ -329,28 +339,91 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _queue_new_path_count->memory());
 				_kernel_logic->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_logic->setArgument(arg++, _queue_lambertian_count->memory());
-				_eventQueue += _kernel_logic->launch(_lane.queue, 0, kWavefrontPathCount);
+				r = task_from_event(_kernel_logic->launch(_lane.queue, 0, kWavefrontPathCount));
+				break;
 			}
-
-			{
+			case (__COUNTER__ - BASE): {
 				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(0, _ac_color->memory());
 				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(1, _image_color->memory());
-				_eventQueue += _kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
+				r = task_from_event(_kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y));
+				break;
 			}
-			{
+			case (__COUNTER__ - BASE): {
 				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(0, _ac_normal->memory());
 				_kernel_RGB24Accumulation_to_RGBA8_linear->setArgument(1, _image_normal->memory());
-				_eventQueue += _kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
+				r = task_from_event(_kernel_RGB24Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y));
+				break;
 			}
-			
-			transfer_image(_imageWorker, _image_color.get(), _lane.queue, colorReciever, _camera->resolution_x, _camera->resolution_y);
-			transfer_image(_imageWorker, _image_normal.get(), _lane.queue, normalReciever, _camera->resolution_x, _camera->resolution_y);
+			case (__COUNTER__ - BASE): {
+				if (colorReciever) {
+					auto map_ptr = _image_color->map_readonly(_lane.context, _lane.queue);
+					r = std::shared_ptr<TaskPostProcesser>(new TaskPostProcesser(task_from_event(map_ptr->map_event()), [=]() {
+						colorReciever->set_image(map_ptr->ptr(), _camera->resolution_x, _camera->resolution_y);
+						map_ptr->set_unmaped();
+					}));
+				}
+				else {
+					r = std::shared_ptr<NullTaskItem>(new NullTaskItem());
+				}
+				break;
+			}
+			case (__COUNTER__ - BASE): {
+				if (normalReciever) {
+					auto map_ptr = _image_normal->map_readonly(_lane.context, _lane.queue);
+					r = std::shared_ptr<TaskPostProcesser>(new TaskPostProcesser(task_from_event(map_ptr->map_event()), [=]() {
+						normalReciever->set_image(map_ptr->ptr(), _camera->resolution_x, _camera->resolution_y);
+						map_ptr->set_unmaped();
+					}));
+				}
+				else {
+					r = std::shared_ptr<NullTaskItem>(new NullTaskItem());
+				}
+				break;
+			}
+			}
+
+			constexpr int LENGTH = __COUNTER__ - BASE;
+			_stage = (_stage + 1) % LENGTH;
+
+			return r;
+		}
+
+		void pump() {
+			for (auto task : _taskItems) {
+				task->update();
+			}
+
+			//for (int i = 0; i < _taskItems.size(); ++i) {
+			//	printf("%s, ", _taskItems[i]->is_completed() ? "o" : "x");
+			//}
+			//printf("\n");
+
+			//auto remove_it = std::remove_if(_taskItems.begin(), _taskItems.end(), [](std::shared_ptr<TaskItem> item) {
+			//	return item->is_completed();
+			//});
+			//_taskItems.erase(remove_it, _taskItems.end());
+
+			while (_taskItems.empty() == false) {
+				if (_taskItems[0]->is_completed()) {
+					_taskItems.erase(_taskItems.begin());
+				}
+				else {
+					break;
+				}
+			}
+
+			int kMinTaskCount = 16;
+			while (_taskItems.size() < kMinTaskCount) {
+				_taskItems.push_back(fireNextTask());
+			}
 		}
 
 		OpenCLLane _lane;
 		houdini_alembic::CameraObject *_camera;
 
 		std::unique_ptr<SceneBuffer> _sceneBuffer;
+
+		int _stage = 0;
 
 		// kernels
 		std::unique_ptr<OpenCLKernel> _kernel_random_initialize;
@@ -384,18 +457,17 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_count;
 
 		// Accumlation Buffer
-		std::unique_ptr<OpenCLBuffer<RGB24AccumulationValueType>> _ac_color;
-		std::unique_ptr<OpenCLBuffer<RGB24AccumulationValueType>> _ac_normal;
+		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _ac_color;
+		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _ac_normal;
 
 		// Image Object
-		std::unique_ptr<OpenCLBuffer<RGBA8ValueType>> _image_color;
-		std::unique_ptr<OpenCLBuffer<RGBA8ValueType>> _image_normal;
+		std::unique_ptr<OpenCLReentrantSafePinnedBuffer<RGBA8ValueType>> _image_color;
+		std::unique_ptr<OpenCLReentrantSafePinnedBuffer<RGBA8ValueType>> _image_normal;
 
 		IImageReciever *colorReciever = nullptr;
 		IImageReciever *normalReciever = nullptr;
 
-		WorkerThread _imageWorker;
-		EventQueue _eventQueue;
+		std::vector<std::shared_ptr<TaskItem>> _taskItems;
 	};
 
 	class WavefrontPathTracing {
@@ -422,23 +494,28 @@ namespace rt {
 
 			_sceneManager.buildBVH();
 
-			auto lane = context->lane(0);
+			// ALL
+			for (int i = 0; i < context->deviceCount(); ++i) {
+				auto lane = context->lane(i);
+				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager));
+				wavefront_lane->initialize(i);
+				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			}
 
-			_wavefrontLane = unique(new WavefrontLane(lane, _camera, _sceneManager));
-			_wavefrontLane->initialize(0);
-
-			_continue = true;
-
-			_workers.emplace_back([&](){
-				while (_continue) {
-					_wavefrontLane->step();
-				}
-			});
+			// 
+			//for (int i = 0; i < 1; ++i) {
+			//	auto lane = context->lane(i);
+			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager));
+			//	wavefront_lane->initialize(i);
+			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			//}
 		}
 		~WavefrontPathTracing() {
-			_continue = false;
-			for (int i = 0; i < _workers.size(); ++i) {
-				_workers[i].join();
+		}
+
+		void pump() {
+			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+				_wavefront_lanes[i]->pump();
 			}
 		}
 
@@ -448,10 +525,6 @@ namespace rt {
 
 		SceneManager _sceneManager;
 
-		// 仮
-		std::unique_ptr<WavefrontLane> _wavefrontLane;
-
-		std::atomic<bool> _continue;
-		std::vector<std::thread> _workers;
+		std::vector<std::unique_ptr<WavefrontLane>> _wavefront_lanes;
 	};
 }

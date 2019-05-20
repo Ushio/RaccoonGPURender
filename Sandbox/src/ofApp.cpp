@@ -9,12 +9,12 @@ using namespace rt;
 OpenCLContext *context_ptr;
 WavefrontPathTracing *pt;
 
-class ImageRecieverForOF : public IImageReciever {
+class ImageRecieverForOF {
 public:
 	ImageRecieverForOF() {
 		_dirty = false;
 	}
-	virtual void set_image(RGBA8ValueType *p, int w, int h) {
+	virtual void setImageAtomic(RGBA8ValueType *p, int w, int h) {
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
@@ -22,7 +22,7 @@ public:
 		_dirty = true;
 	}
 
-	ofImage &get_image() {
+	ofImage &getImageOnMainThread() {
 		if (_dirty) {
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_image.setFromPixels(_imagedata);
@@ -73,7 +73,11 @@ void ofApp::setup() {
 	}
 
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
-	pt->_wavefront_lanes[0]->colorReciever = &colorReciever;
+	pt->_wavefront_lanes[0]->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
+		colorReciever.setImageAtomic(p, w, h);
+	};
+	pt->launch();
+
 	// pt->_wavefront_lanes[0]->normalReciever = &normalReciever;
 	
 }
@@ -84,7 +88,7 @@ void ofApp::exit() {
 
 //--------------------------------------------------------------
 void ofApp::update() {
-	pt->pump();
+
 }
 
 //--------------------------------------------------------------
@@ -168,8 +172,8 @@ void ofApp::draw() {
 		ofxRaccoonImGui::image(image);
 		ImGui::End();
 	};
-	showImage("color", colorReciever.get_image());
-	showImage("normal", normalReciever.get_image());
+	showImage("color", colorReciever.getImageOnMainThread());
+	showImage("normal", normalReciever.getImageOnMainThread());
 }
 
 //--------------------------------------------------------------

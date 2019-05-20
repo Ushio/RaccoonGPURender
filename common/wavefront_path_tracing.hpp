@@ -146,25 +146,24 @@ namespace rt {
 			item.event = event;
 			item.on_finished = on_finished;
 
+			//for (;;) {
+			//	if (_queue.empty()) {
+			//		printf("warning: gpu queue is empty\n");
+			//		break;
+			//	}
+			//	if (_queue.front().event->is_completed() == false) {
+			//		printf("queue: %d\n", _queue.size());
+			//		break;
+			//	}
 
-			for (;;) {
-				//if (_queue.empty()) {
-				//	printf("warning: gpu queue is empty\n");
-				//	break;
-				//}
-				//if (_queue.front().event->is_completed() == false) {
-				//	printf("queue: %d\n", _queue.size());
-				//	break;
-				//}
+			//	auto front = _queue.front();
+			//	_queue.pop();
 
-				auto front = _queue.front();
-				_queue.pop();
-
-				front.event->wait();
-				if (front.on_finished) {
-					front.on_finished();
-				}
-			}
+			//	front.event->wait();
+			//	if (front.on_finished) {
+			//		front.on_finished();
+			//	}
+			//}
 
 			_queue.push(item);
 

@@ -12,7 +12,7 @@
 #include "stopwatch.hpp"
 
 namespace rt {
-	static const uint32_t kWavefrontPathCount = 1 << 24; /* 2^24 */
+	static const uint32_t kWavefrontPathCountGPU = 1 << 24; /* 2^24 */
 
 	struct WavefrontPath {
 		OpenCLFloat3 T;
@@ -145,33 +145,33 @@ namespace rt {
 			Item item;
 			item.event = event;
 			item.on_finished = on_finished;
-
-			//for (;;) {
-			//	if (_queue.empty()) {
-			//		printf("warning: gpu queue is empty\n");
-			//		break;
-			//	}
-			//	if (_queue.front().event->is_completed() == false) {
-			//		printf("queue: %d\n", _queue.size());
-			//		break;
-			//	}
-
-			//	auto front = _queue.front();
-			//	_queue.pop();
-
-			//	front.event->wait();
-			//	if (front.on_finished) {
-			//		front.on_finished();
-			//	}
-			//}
-
 			_queue.push(item);
 
+			while(_queue.empty() == false) {
+				auto front = _queue.front();
+
+				// item is already completed.
+				if (front.event->is_completed()) {
+					if (front.on_finished) {
+						front.on_finished();
+					}
+					_queue.pop();
+
+					// process next event
+					continue;
+				} else {
+					// front item is not finished.
+					break;
+				}
+			}
+
+			// when the item buckets filled
 			if (_maxItem < _queue.size()) {
 				auto front = _queue.front();
 				_queue.pop();
 
 				front.event->wait();
+
 				if (front.on_finished) {
 					front.on_finished();
 				}
@@ -208,15 +208,28 @@ namespace rt {
 	//				else {
 	//					std::this_thread::sleep_for(std::chrono::nanoseconds(1));
 	//				}
-	//			});
-	//		}
+	//			}
+	//		});
 	//	}
+	//	~WorkerThread() {
+	//		_continue = false;
+	//		_thread.join();
+	//	}
+	//	void run(std::function<void(void)> f) {
+	//		std::lock_guard<std::mutex> lock(_mutex);
+	//		_items.push(f);
+	//	}
+	//private:
+	//	std::atomic<bool> _continue;
+	//	std::thread _thread;
+	//	std::mutex _mutex;
+	//	std::queue<std::function<void(void)>> _items;
 	//};
 
 	class WavefrontLane {
 	public:
-		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager)
-			:_lane(lane), _camera(camera) {
+		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager, int wavefrontPathCount)
+			:_lane(lane), _camera(camera), _wavefrontPathCount(wavefrontPathCount) {
 			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
 			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
 
@@ -240,20 +253,20 @@ namespace rt {
 			_kernel_RGB24Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_linear", program_debug.program()));
 			_kernel_RGB24Accumulation_to_RGBA8_tonemap_simplest = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_tonemap_simplest", program_debug.program()));
 			
-			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, kWavefrontPathCount));
-			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, kWavefrontPathCount));
+			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount));
+			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount));
 
 			uint64_t kZero64 = 0;
 			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1));
 
-			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, kWavefrontPathCount));
+			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, _wavefrontPathCount));
 
-			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, kWavefrontPathCount));
+			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount));
 
 			uint32_t kZero32 = 0;
-			_queue_new_path_item = unique(new OpenCLBuffer<uint32_t>(lane.context, kWavefrontPathCount));
+			_queue_new_path_item = unique(new OpenCLBuffer<uint32_t>(lane.context, _wavefrontPathCount));
 			_queue_new_path_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1));
-			_queue_lambertian_item = unique(new OpenCLBuffer<uint32_t>(lane.context, kWavefrontPathCount));
+			_queue_lambertian_item = unique(new OpenCLBuffer<uint32_t>(lane.context, _wavefrontPathCount));
 			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1));
 
 			// accumlation
@@ -270,12 +283,12 @@ namespace rt {
 
 		void initialize(int lane_index) {
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
-			_kernel_random_initialize->setArgument(1, lane_index * kWavefrontPathCount);
-			_kernel_random_initialize->launch(_lane.queue, 0, kWavefrontPathCount);
+			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
+			_kernel_random_initialize->launch(_lane.queue, 0, _wavefrontPathCount);
 
 			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path_item->memory());
 			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path_count->memory());
-			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
 		}
 
 		void step() {
@@ -288,7 +301,7 @@ namespace rt {
 				_kernel_new_path->setArgument(arg++, _mem_random_state->memory());
 				_kernel_new_path->setArgument(arg++, _mem_next_pixel_index->memory());
 				_kernel_new_path->setArgument(arg++, standardCamera(_camera));
-				_kernel_new_path->launch(_lane.queue, 0, kWavefrontPathCount);
+				_kernel_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
 
 				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
 				_kernel_finalize_new_path->setArgument(1, _queue_new_path_count->memory());
@@ -303,7 +316,7 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _mem_shading_results->memory());
 				_kernel_lambertian->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_lambertian->setArgument(arg++, _queue_lambertian_count->memory());
-				_kernel_lambertian->launch(_lane.queue, 0, kWavefrontPathCount);
+				_kernel_lambertian->launch(_lane.queue, 0, _wavefrontPathCount);
 
 				_kernel_finalize_lambertian->setArgument(0, _queue_lambertian_count->memory());
 				_eventQueue += _kernel_finalize_lambertian->launch(_lane.queue, 0, 1);
@@ -319,7 +332,7 @@ namespace rt {
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
-				_eventQueue += _kernel_extension_ray_cast->launch(_lane.queue, 0, kWavefrontPathCount);
+				_eventQueue += _kernel_extension_ray_cast->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
 			{
@@ -334,7 +347,7 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _queue_new_path_count->memory());
 				_kernel_logic->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_logic->setArgument(arg++, _queue_lambertian_count->memory());
-				_eventQueue += _kernel_logic->launch(_lane.queue, 0, kWavefrontPathCount);
+				_eventQueue += _kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
 			{
@@ -373,6 +386,7 @@ namespace rt {
 			}
 		}
 		
+		int _wavefrontPathCount = 0;
 		OpenCLLane _lane;
 		houdini_alembic::CameraObject *_camera;
 
@@ -422,6 +436,8 @@ namespace rt {
 		// public events, pointer, width, height
 		std::function<void(RGBA8ValueType *, int, int)> onColorRecieved;
 		std::function<void(RGBA8ValueType *, int, int)> onNormalRecieved;
+
+		// WorkerThread _callback_worker;
 	};
 
 	class WavefrontPathTracing {
@@ -451,17 +467,23 @@ namespace rt {
 			// ALL
 			for (int i = 0; i < context->deviceCount(); ++i) {
 				auto lane = context->lane(i);
-				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager));
+				if (lane.is_gpu == false) {
+					continue;
+				}
+				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, kWavefrontPathCountGPU));
 				wavefront_lane->initialize(i);
 				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			}
 
-			//for (int i = 0; i < 1; ++i) {
-			//	auto lane = context->lane(i);
-			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager));
-			//	wavefront_lane->initialize(i);
-			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-			//}
+			for (int i = 0; i < 1; ++i) {
+				auto lane = context->lane(i);
+				if (lane.is_gpu == false) {
+					continue;
+				}
+				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, kWavefrontPathCountGPU));
+				wavefront_lane->initialize(i);
+				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			}
 		}
 		~WavefrontPathTracing() {
 			_continue = false;
@@ -481,7 +503,6 @@ namespace rt {
 					}
 				});
 			}
-
 		}
 
 		OpenCLContext *_context;

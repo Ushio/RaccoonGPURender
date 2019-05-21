@@ -121,6 +121,14 @@ namespace rt {
 
 #define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
 
+	struct OpenCLEventCallback {
+		std::function<void(void)> onEvent;
+	};
+	static void on_event_completed(cl_event event, cl_int event_command_exec_status, void *user_data) {
+		OpenCLEventCallback *callback = (OpenCLEventCallback *)user_data;
+		delete callback;
+	}
+
 	class OpenCLEvent {
 	public:
 		OpenCLEvent(cl_event e) :_event(e, clReleaseEvent) { }
@@ -156,6 +164,13 @@ namespace rt {
 		}
 		cl_event event_object() const {
 			return _event.get();
+		}
+
+		void set_event_callback(std::function<void(void)> onEvent) {
+			OpenCLEventCallback *callback = new OpenCLEventCallback();
+			callback->onEvent = onEvent;
+			cl_int status = clSetEventCallback(_event.get(), CL_COMPLETE, on_event_completed, callback);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "set_event_callback() failed");
 		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
@@ -337,6 +352,7 @@ namespace rt {
 		cl_device_id device_id = nullptr;
 		cl_context context = nullptr;
 		cl_command_queue queue = nullptr;
+		bool is_gpu = true;
 	};
 
 	class OpenCLContext {
@@ -352,6 +368,7 @@ namespace rt {
 			std::string name;
 			std::string version;
 			std::string extensions;
+			bool is_gpu;
 		};
 		OpenCLContext() {
 			cl_int status;
@@ -397,10 +414,7 @@ namespace rt {
 					cl_device_type device_type;
 					status = clGetDeviceInfo(device_id, CL_DEVICE_TYPE, sizeof(device_type), &device_type, nullptr);
 					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
-
-					if (device_type & CL_DEVICE_TYPE_CPU) {
-						continue;
-					}
+					device_info.is_gpu = (device_type & CL_DEVICE_TYPE_GPU) != 0;
 
 					DeviceContext deviceContext;
 					deviceContext.platform_info = platform_info;
@@ -446,6 +460,7 @@ namespace rt {
 			lane.device_id = _deviceContexts[index].device_id;
 			lane.queue = _deviceContexts[index].queue.get();
 			lane.context = _deviceContexts[index].context.get();
+			lane.is_gpu = _deviceContexts[index].device_info.is_gpu;
 			return lane;
 		}
 		PlatformInfo platform_info(int index) const {

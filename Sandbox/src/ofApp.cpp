@@ -3,7 +3,6 @@
 #include "raccoon_ocl.hpp"
 #include "peseudo_random.hpp"
 #include "wavefront_path_tracing.hpp"
-
 using namespace rt;
 
 OpenCLContext *context_ptr;
@@ -42,7 +41,7 @@ ImageRecieverForOF normalReciever;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
-	// ofSetVerticalSync(false);
+	ofSetVerticalSync(false);
 	ofEnableArbTex();
 
 	ofxRaccoonImGui::initialize();
@@ -71,15 +70,11 @@ void ofApp::setup() {
 	if (error_message.empty() == false) {
 		printf("sample error_message: %s\n", error_message.c_str());
 	}
-
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
 	pt->_wavefront_lanes[0]->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
 	pt->launch();
-
-	// pt->_wavefront_lanes[0]->normalReciever = &normalReciever;
-	
 }
 void ofApp::exit() {
 	delete pt;
@@ -157,6 +152,7 @@ void ofApp::draw() {
 		ofxRaccoonImGui::Tree(info.name.c_str(), false, [&]() {
 			ImGui::Text(info.version.c_str());
 			ImGui::TextWrapped(info.extensions.c_str());
+			ImGui::Text("type : %s", info.is_gpu ? "GPU" : "CPU");
 		});
 	}
 

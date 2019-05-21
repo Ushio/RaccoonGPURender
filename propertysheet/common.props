@@ -5,11 +5,11 @@
   <PropertyGroup />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common/gpu;$(ProjectDir)../common;$(EMBREE_ROOT)/include;$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)../libs/abc;$(ProjectDir)../libs/ofxRaccoonImGui;$(ProjectDir)../libs/houdini_alembic;$(ProjectDir)../common/gpu;$(ProjectDir)../common;$(EMBREE_ROOT)/include;$(OCL_ROOT)/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(EMBREE_ROOT)\lib;$(CUDA_PATH)\lib\$(Platform);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(EMBREE_ROOT)/lib;$(OCL_ROOT)/lib/x86_64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>embree3.lib;OpenCL.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>

@@ -121,13 +121,13 @@ namespace rt {
 
 #define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
 
-	struct OpenCLEventCallback {
-		std::function<void(void)> onEvent;
-	};
-	static void on_event_completed(cl_event event, cl_int event_command_exec_status, void *user_data) {
-		OpenCLEventCallback *callback = (OpenCLEventCallback *)user_data;
-		delete callback;
-	}
+	//struct OpenCLEventCallback {
+	//	std::function<void(void)> onEvent;
+	//};
+	//static void on_event_completed(cl_event event, cl_int event_command_exec_status, void *user_data) {
+	//	OpenCLEventCallback *callback = (OpenCLEventCallback *)user_data;
+	//	delete callback;
+	//}
 
 	class OpenCLEvent {
 	public:
@@ -166,14 +166,90 @@ namespace rt {
 			return _event.get();
 		}
 
-		void set_event_callback(std::function<void(void)> onEvent) {
-			OpenCLEventCallback *callback = new OpenCLEventCallback();
-			callback->onEvent = onEvent;
-			cl_int status = clSetEventCallback(_event.get(), CL_COMPLETE, on_event_completed, callback);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "set_event_callback() failed");
-		}
+		//void set_event_callback(std::function<void(void)> onEvent) {
+		//	OpenCLEventCallback *callback = new OpenCLEventCallback();
+		//	callback->onEvent = onEvent;
+		//	cl_int status = clSetEventCallback(_event.get(), CL_COMPLETE, on_event_completed, callback);
+		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "set_event_callback() failed");
+		//}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
+	};
+
+	class OpenCLCustomEvent {
+	public:
+		OpenCLCustomEvent(cl_context context) {
+			cl_int status;
+			_custom_event = decltype(_custom_event)(clCreateUserEvent(context, &status), clReleaseEvent);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateUserEvent() failed");
+		}
+		OpenCLCustomEvent(const OpenCLCustomEvent &) = delete;
+		void operator=(const OpenCLCustomEvent &) = delete;
+
+		void enqueue_barrier(cl_command_queue queue) {
+			cl_event e = _custom_event.get();
+			cl_int status = clEnqueueBarrierWithWaitList(queue, 1, &e, nullptr);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
+		}
+		void complete() {
+			cl_int status = clSetUserEventStatus(_custom_event.get(), CL_COMPLETE);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
+		}
+	private:
+		std::shared_ptr<std::remove_pointer<cl_event>::type> _custom_event;
+	};
+	
+	class OpenCLEventList {
+	public:
+		void add(cl_event e) {
+			_events.emplace_back(e);
+		}
+		const cl_event *events() const {
+			if (_events.empty()) {
+				return nullptr;
+			}
+			return _events.data();
+		}
+		std::size_t size() {
+			return _events.size();
+		}
+	private:
+		std::vector<cl_event> _events;
+	};
+
+	template <class T>
+	class OpenCLPinnedBufferForRead {
+	public:
+		OpenCLPinnedBufferForRead(cl_context context, cl_command_queue queue, uint32_t length)
+			: _context(context)
+			, _queue(queue)
+			, _length(length) {
+
+			cl_int status;
+			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, length * sizeof(T), nullptr, &status);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
+			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
+			_memory = decltype(_memory)(memory, clReleaseMemObject);
+
+			_ptr = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, nullptr, &status);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMapBuffer() failed");
+		}
+		~OpenCLPinnedBufferForRead() {
+			cl_int status = clEnqueueUnmapMemObject(_queue, _memory.get(), _ptr, 0, nullptr, nullptr);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
+		}
+		cl_mem memory() const {
+			return _memory.get();
+		}
+		T *ptr() {
+			return _ptr;
+		}
+	private:
+		cl_context _context;
+		cl_command_queue _queue;
+		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
+		uint32_t _length = 0;
+		T *_ptr = nullptr;
 	};
 
 	template <class T>
@@ -205,17 +281,17 @@ namespace rt {
 		}
 
 		std::shared_ptr<OpenCLEvent> map_readonly(T **value, cl_command_queue queue, cl_event event_for_wait = nullptr) {
-			cl_event read_event;
+			cl_event map_event;
 			cl_int status;
 
 			cl_event *lists = event_for_wait ? &event_for_wait : nullptr;
 			int listCount = event_for_wait ? 1 : 0;
 
-			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), listCount, lists, &read_event, &status);
+			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), listCount, lists, &map_event, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			status = clFlush(queue);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
-			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(read_event));
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(map_event));
 		}
 		void unmap(T *value, cl_command_queue queue) {
 			cl_int status = clEnqueueUnmapMemObject(queue, _memory.get(), value, 0, nullptr, nullptr);
@@ -231,120 +307,22 @@ namespace rt {
 		uint32_t size() const {
 			return _length;
 		}
-	private:
-		cl_context _context;
-		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
-		uint32_t _length = 0;
-	};
 
-	/*
-	Reentrant Safety
-
-	clEnqueueNDRangeKernel
-	clEnqueueNDRangeKernel
-	clEnqueueNDRangeKernel
-		clEnqueueUnmapMemObject   (If Needed)  with custom event
-		clEnqueueMapBuffer prepare custom event
-	clEnqueueNDRangeKernel
-	clEnqueueNDRangeKernel
-	clEnqueueNDRangeKernel
-		clEnqueueUnmapMemObject with custom event
-		clEnqueueMapBuffer
-	clEnqueueNDRangeKernel
-	clEnqueueNDRangeKernel
-	clEnqueueNDRangeKernel
-
-	*/
-	template <class T>
-	class OpenCLReentrantSafePinnedBuffer {
-	public:
-		OpenCLReentrantSafePinnedBuffer(cl_context context, const T *value, uint32_t length)
-			: _context(context)
-			, _length(length) {
-
-			cl_int status;
-			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR, length * sizeof(T), (void *)value, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
-			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
-			_memory = decltype(_memory)(memory, clReleaseMemObject);
-		}
-		OpenCLReentrantSafePinnedBuffer(cl_context context, uint32_t length)
-			: _context(context)
-			, _length(length) {
-
-			cl_int status;
-			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, length * sizeof(T), nullptr, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
-			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
-			_memory = decltype(_memory)(memory, clReleaseMemObject);
-		}
-		cl_mem memory() const {
-			return _memory.get();
-		}
-		class MappedPointer {
-		public:
-			T *ptr() {
-				return _map_ptr;
+		std::shared_ptr<OpenCLEvent> copy_to_host(OpenCLPinnedBufferForRead<T> *value, cl_command_queue queue, cl_event event_wait) {
+			cl_event copy_event;
+			OpenCLEventList event_list;
+			if (event_wait) {
+				event_list.add(event_wait);
 			}
-			std::shared_ptr<OpenCLEvent> map_event() {
-				return _map_event;
-			}
-			void set_unmaped() {
-				cl_int status = clSetUserEventStatus(_unmap_trigger.get(), CL_COMPLETE);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetUserEventStatus() failed");
-			}
-		private:
-			friend OpenCLReentrantSafePinnedBuffer<T>;
-
-			T *_map_ptr;
-			std::shared_ptr<OpenCLEvent> _map_event;
-			std::shared_ptr<std::remove_pointer<cl_event>::type> _unmap_trigger;
-		};
-		std::shared_ptr<MappedPointer> map_readonly(cl_context context, cl_command_queue queue) {
-			cl_event map_event;
-			cl_int status;
-
-			auto r = std::shared_ptr<MappedPointer>(new MappedPointer());
-
-			if (_is_map_queued == false) {
-				_prev_ptr = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &map_event, &status);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
-				status = clFlush(queue);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
-
-				_is_map_queued = true;
-			}
-			else {
-				cl_event unmap_trigger = _prev_unmap_trigger.get();
-				cl_int status = clEnqueueUnmapMemObject(queue, _memory.get(), _prev_ptr, 1, &unmap_trigger, nullptr);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
-
-				_prev_ptr = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &map_event, &status);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
-				status = clFlush(queue);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
-			}
-
-			// Custom Event
-			_prev_unmap_trigger = decltype(_prev_unmap_trigger)(clCreateUserEvent(context, &status), clReleaseEvent);
-
-			r->_map_event = std::shared_ptr<OpenCLEvent>(new OpenCLEvent(map_event));
-			r->_map_ptr = _prev_ptr;
-			r->_unmap_trigger = _prev_unmap_trigger;
-			return r;
-		}
-
-		uint32_t size() const {
-			return _length;
+			cl_int status = clEnqueueReadBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), event_list.size(), event_list.events(), &copy_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			clFlush(queue);
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(copy_event));
 		}
 	private:
 		cl_context _context;
 		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
 		uint32_t _length = 0;
-
-		bool _is_map_queued = false;
-		T *_prev_ptr = nullptr;
-		std::shared_ptr<std::remove_pointer<cl_event>::type> _prev_unmap_trigger;
 	};
 
 	class OpenCLLane {
@@ -352,6 +330,7 @@ namespace rt {
 		cl_device_id device_id = nullptr;
 		cl_context context = nullptr;
 		cl_command_queue queue = nullptr;
+		cl_command_queue queue_data_transfer = nullptr;
 		bool is_gpu = true;
 	};
 
@@ -432,6 +411,11 @@ namespace rt {
 					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
 					deviceContext.queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
 
+					cl_command_queue queue_data_transfer = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
+					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
+					deviceContext.queue_data_transfer = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue_data_transfer, clReleaseCommandQueue);
+
 					_deviceContexts.push_back(deviceContext);
 				}
 			}
@@ -458,9 +442,10 @@ namespace rt {
 			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			OpenCLLane lane;
 			lane.device_id = _deviceContexts[index].device_id;
-			lane.queue = _deviceContexts[index].queue.get();
-			lane.context = _deviceContexts[index].context.get();
-			lane.is_gpu = _deviceContexts[index].device_info.is_gpu;
+			lane.queue     = _deviceContexts[index].queue.get();
+			lane.queue_data_transfer = _deviceContexts[index].queue_data_transfer.get();
+			lane.context   = _deviceContexts[index].context.get();
+			lane.is_gpu    = _deviceContexts[index].device_info.is_gpu;
 			return lane;
 		}
 		PlatformInfo platform_info(int index) const {
@@ -478,6 +463,7 @@ namespace rt {
 			cl_device_id device_id = nullptr;
 			std::shared_ptr<std::remove_pointer<cl_context>::type> context;
 			std::shared_ptr<std::remove_pointer<cl_command_queue>::type> queue;
+			std::shared_ptr<std::remove_pointer<cl_command_queue>::type> queue_data_transfer;
 		};
 		std::vector<DeviceContext> _deviceContexts;
 	};

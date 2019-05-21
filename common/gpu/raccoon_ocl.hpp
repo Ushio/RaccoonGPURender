@@ -188,7 +188,7 @@ namespace rt {
 
 		void enqueue_barrier(cl_command_queue queue) {
 			cl_event e = _custom_event.get();
-			cl_int status = clEnqueueBarrierWithWaitList(queue, 1, &e, nullptr);
+			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, nullptr);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
 		}
 		void complete() {

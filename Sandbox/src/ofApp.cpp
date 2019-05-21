@@ -74,9 +74,12 @@ void ofApp::setup() {
 	pt->_wavefront_lanes[0]->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
-	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
-	//	normalReciever.setImageAtomic(p, w, h);
-	//};
+	pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
+		normalReciever.setImageAtomic(p, w, h);
+	};
+	pt->_wavefront_lanes[0]->onColorAccumRecieved = [](RGB32AccumulationValueType *p, int w, int h) {
+
+	};
 	pt->launch();
 }
 void ofApp::exit() {

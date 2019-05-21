@@ -308,9 +308,6 @@ namespace rt {
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_debug.program()));
 			_kernel_RGB24Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_linear", program_debug.program()));
 			_kernel_RGB24Accumulation_to_RGBA8_tonemap_simplest = unique(new OpenCLKernel("RGB24Accumulation_to_RGBA8_tonemap_simplest", program_debug.program()));
-			
-			OpenCLProgram program_copy("copy.cl", lane.context, lane.device_id);
-			_kernel_copy_RGB24Accumulation = unique(new OpenCLKernel("copy_RGB24Accumulation", program_copy.program()));
 
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount));
@@ -420,25 +417,6 @@ namespace rt {
 				}
 			}
 
-			//// for prepare copy
-			//{
-			//	_eventQueue += _ac_color->copy_to(_ac_color_for_read->memory(), _lane.queue_data_transfer);
-
-			//	//_kernel_copy_RGB24Accumulation->setArgument(0, _ac_color->memory());
-			//	//_kernel_copy_RGB24Accumulation->setArgument(1, _ac_color_for_read->memory());
-			//	//_eventQueue += _kernel_copy_RGB24Accumulation->launch(_lane.queue, 0, _ac_color->size());
-			//}
-			//{
-			//	auto map_ptr = _ac_color_for_read->map_readonly(_lane.context, _lane.queue_data_transfer);
-			//	int w = _camera->resolution_x;
-			//	int h = _camera->resolution_y;
-			//	_ac_color_data.resize(_ac_color_for_read->size());
-			//	_eventQueue.add(map_ptr->map_event(), [map_ptr, w, h, this]() {
-			//		std::copy(map_ptr->ptr(), map_ptr->ptr() + _ac_color_data.size(), _ac_color_data.data());
-			//		map_ptr->set_unmaped();
-			//	});
-			//}
-
 			// for previews
 			if(onColorRecieved) {
 				_image_color->transfer_finish_before_touch_buffer(_lane.queue);
@@ -495,8 +473,6 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB24Accumulation_to_RGBA8_linear;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB24Accumulation_to_RGBA8_tonemap_simplest;
-
-		std::unique_ptr<OpenCLKernel> _kernel_copy_RGB24Accumulation;
 
 		// buffers
 		std::unique_ptr<OpenCLBuffer<glm::uvec4>> _mem_random_state;

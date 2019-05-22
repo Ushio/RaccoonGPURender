@@ -412,9 +412,24 @@ namespace rt {
 			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path_item->memory());
 			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path_count->memory());
 			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
+
+			// initialize queue state
+			_queue_lambertian_count->fill(0, _lane.queue);
+
+			// clear buffer
+			_accum_color->fill(RGB32AccumulationValueType(), _lane.queue);
+			_accum_normal->fill(RGB32AccumulationValueType(), _lane.queue);
 		}
 
 		void step() {
+			{
+				std::lock_guard <std::mutex> lock(_restart_mutex);
+				if (_restart_bang) {
+					initialize(_restart_parameter.lane_index);
+					_restart_bang = false;
+				}
+			}
+
 			{
 				int arg = 0;
 				_kernel_new_path->setArgument(arg++, _queue_new_path_item->memory());
@@ -553,6 +568,12 @@ namespace rt {
 		cl_command_queue data_transfer1() const {
 			return _data_transfer0->queue();
 		}
+
+		void re_start(int lane_index) {
+			std::lock_guard <std::mutex> lock(_restart_mutex);
+			_restart_bang = true;
+			_restart_parameter.lane_index = lane_index;
+		}
 		
 		int _wavefrontPathCount = 0;
 		OpenCLLane _lane;
@@ -619,13 +640,16 @@ namespace rt {
 		std::function<void(RGBA8ValueType *, int, int)> onNormalRecieved;
 
 		// for data transfer synchronization
-		WorkerThread _copy_worker;
+		// WorkerThread _copy_worker;
+
+		// Restart 
+		struct RestartParameter {
+			int lane_index = 0;
+		};
+		bool _restart_bang = false;
+		RestartParameter _restart_parameter;
+		std::mutex _restart_mutex;
 	};
-
-	//class WavefrontBufferOperator {
-	//public:
-
-	//};
 
 	class WavefrontPathTracing {
 	public:
@@ -757,6 +781,7 @@ namespace rt {
 			});
 		}
 
+
 		void launch_fixed(int steps) {
 			tbb::task_group g;
 			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
@@ -770,6 +795,12 @@ namespace rt {
 			g.wait();
 
 			create_color_image();
+		}
+
+		void re_start() {
+			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+				_wavefront_lanes[i]->re_start(i);
+			}
 		}
 
 		std::function<void(RGBA8ValueType *, int, int)> onColorRecieved;

@@ -6,7 +6,7 @@
 */
 inline bool intersect_ray_triangle(float3 ro, float3 rd, float3 v0, float3 v1, float3 v2, float *tmin, float2 *uv)
 {
-	const float kEpsilon = 1.0e-5;
+	const float kEpsilon = 1.0e-8;
 
 	float3 v0v1 = v1 - v0;
 	float3 v0v2 = v2 - v0;

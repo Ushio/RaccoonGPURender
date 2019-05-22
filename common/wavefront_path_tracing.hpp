@@ -110,20 +110,20 @@ namespace rt {
 		return glm::vec3(v.x, v.y, v.z);
 	}
 
-	inline StandardCamera standardCamera(houdini_alembic::CameraObject *camera) {
+	inline StandardCamera standardCamera(const houdini_alembic::CameraObject &camera) {
 		StandardCamera c;
-		c.image_size = glm::uvec2(camera->resolution_x, camera->resolution_y);
-		c.eye = to_vec3(camera->eye);
-		c.forward = to_vec3(camera->forward);
-		c.up = to_vec3(camera->up);
-		c.right = to_vec3(camera->right);
+		c.image_size = glm::uvec2(camera.resolution_x, camera.resolution_y);
+		c.eye = to_vec3(camera.eye);
+		c.forward = to_vec3(camera.forward);
+		c.up = to_vec3(camera.up);
+		c.right = to_vec3(camera.right);
 
 		c.imageplane_o = 
-			to_vec3(camera->eye) + to_vec3(camera->forward) * camera->focusDistance
-			+ to_vec3(camera->left) * camera->objectPlaneWidth * 0.5f
-			+ to_vec3(camera->up)   * camera->objectPlaneHeight * 0.5f;
-		c.imageplane_r = to_vec3(camera->right) * camera->objectPlaneWidth  / camera->resolution_x;
-		c.imageplane_b = to_vec3(camera->down)  * camera->objectPlaneHeight / camera->resolution_y;
+			to_vec3(camera.eye) + to_vec3(camera.forward) * camera.focusDistance
+			+ to_vec3(camera.left) * camera.objectPlaneWidth * 0.5f
+			+ to_vec3(camera.up)   * camera.objectPlaneHeight * 0.5f;
+		c.imageplane_r = to_vec3(camera.right) * camera.objectPlaneWidth  / camera.resolution_x;
+		c.imageplane_b = to_vec3(camera.down)  * camera.objectPlaneHeight / camera.resolution_y;
 		return c;
 	}
 
@@ -240,7 +240,7 @@ namespace rt {
 	//	void transfer_finish_before_touch_buffer(cl_command_queue queue) {
 	//		// Before touch to buffer, we must wait for unlock event.
 	//		if (_buffer_pinned_lock) {
-	//			_buffer_pinned_lock->enqueue_barrier(queue);
+	//			_buffer_pinned_lock->enqueue_marker(queue);
 	//			_buffer_pinned_lock = std::shared_ptr<OpenCLCustomEvent>();
 	//		}
 	//	}
@@ -330,7 +330,7 @@ namespace rt {
 	class WavefrontLane {
 	public:
 		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager, int wavefrontPathCount)
-			:_lane(lane), _camera(camera), _wavefrontPathCount(wavefrontPathCount) {
+			:_lane(lane), _camera(*camera), _wavefrontPathCount(wavefrontPathCount) {
 			_data_transfer0 = unique(new OpenCLQueue(lane.context, lane.device_id));
 			_data_transfer1 = unique(new OpenCLQueue(lane.context, lane.device_id));
 			_worker_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
@@ -377,13 +377,13 @@ namespace rt {
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 
 			// accumlation
-			_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y, OpenCLKernelBufferMode::ReadWrite));
-			_accum_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, camera->resolution_x * camera->resolution_y, OpenCLKernelBufferMode::ReadWrite));
-			//_image_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, camera->resolution_x * camera->resolution_y));
-			//_image_normal = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, camera->resolution_x * camera->resolution_y));
+			_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
+			_accum_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
+			//_image_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+			//_image_normal = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
-			_accum_color_intermediate       = unique(new ReadableBuffer<OpenCLHalf4>(lane.context, lane.queue, camera->resolution_x * camera->resolution_y));
-			_accum_color_intermediate_other = unique(new WritableBuffer<OpenCLHalf4>(lane.context, lane.queue, camera->resolution_x * camera->resolution_y));
+			_accum_color_intermediate       = unique(new ReadableBuffer<OpenCLHalf4>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+			_accum_color_intermediate_other = unique(new WritableBuffer<OpenCLHalf4>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
 			OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id);
 
@@ -395,7 +395,7 @@ namespace rt {
 			_kernel_merge_intermediate->setArgument(0, _accum_color_intermediate->memory());
 			_kernel_merge_intermediate->setArgument(1, _accum_color_intermediate_other->memory());
 
-			_final_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, camera->resolution_x * camera->resolution_y));
+			_final_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 			_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
 			_kernel_tonemap->setArgument(0, _accum_color_intermediate->memory());
 			_kernel_tonemap->setArgument(1, _final_color->memory());
@@ -405,6 +405,8 @@ namespace rt {
 		}
 
 		void initialize(int lane_index) {
+			// enqueue_marker()
+
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
 			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
 			_kernel_random_initialize->launch(_lane.queue, 0, _wavefrontPathCount);
@@ -425,9 +427,15 @@ namespace rt {
 			{
 				std::lock_guard <std::mutex> lock(_restart_mutex);
 				if (_restart_bang) {
+					_camera = _restart_parameter.camera;
+
 					initialize(_restart_parameter.lane_index);
+
+					_step_count = 0;
+
 					_restart_bang = false;
 				}
+				_step_count++;
 			}
 
 			{
@@ -569,15 +577,21 @@ namespace rt {
 			return _data_transfer0->queue();
 		}
 
-		void re_start(int lane_index) {
+		void re_start(int lane_index, const houdini_alembic::CameraObject &camera) {
 			std::lock_guard <std::mutex> lock(_restart_mutex);
 			_restart_bang = true;
 			_restart_parameter.lane_index = lane_index;
+			_restart_parameter.camera = camera;
+		}
+
+		int step_count() {
+			std::lock_guard <std::mutex> lock(_restart_mutex);
+			return _step_count;
 		}
 		
 		int _wavefrontPathCount = 0;
 		OpenCLLane _lane;
-		houdini_alembic::CameraObject *_camera;
+		houdini_alembic::CameraObject _camera;
 
 		std::unique_ptr<OpenCLQueue> _data_transfer0;
 		std::unique_ptr<OpenCLQueue> _data_transfer1;
@@ -645,9 +659,11 @@ namespace rt {
 		// Restart 
 		struct RestartParameter {
 			int lane_index = 0;
+			houdini_alembic::CameraObject camera;
 		};
 		bool _restart_bang = false;
 		RestartParameter _restart_parameter;
+		int _step_count = 0;
 		std::mutex _restart_mutex;
 	};
 
@@ -681,11 +697,28 @@ namespace rt {
 				if (lane.is_gpu == false) {
 					continue;
 				}
+				if (lane.is_dGPU == false) {
+					continue;
+				}
 				int wavefront = lane.is_dGPU ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
 				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
 				wavefront_lane->initialize(i);
 				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			}
+
+			//for (int i = 0; i < 1; ++i) {
+			//	auto lane = context->lane(i);
+			//	if (lane.is_gpu == false) {
+			//		continue;
+			//	}
+			//	if (lane.is_dGPU == false) {
+			//		continue;
+			//	}
+			//	int wavefront = lane.is_dGPU ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
+			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
+			//	wavefront_lane->initialize(i);
+			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			//}
 
 			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);
@@ -734,8 +767,6 @@ namespace rt {
 					
 					g.run([index_merge0, index_merge1, lane0, lane1, intermediate_complete_event_lhs, intermediate_complete_event_rhs, &intermediate_complete_events]() {
 						intermediate_complete_events[index_merge0] = lane0->merge_from(lane1, intermediate_complete_event_lhs, intermediate_complete_event_rhs);
-						auto elapsed = intermediate_complete_events[index_merge0]->wait();
-						
 					});
 				}
 				g.wait();
@@ -752,6 +783,8 @@ namespace rt {
 			auto final_color = _wavefront_lanes[0]->finalize_color(intermediate_complete_events[0]);
 			int w = _camera->resolution_x;
 			int h = _camera->resolution_y;
+
+			// render_id check because maybe re_started...it is not perfect but works.
 			if (onColorRecieved) {
 				onColorRecieved(final_color->ptr(), w, h);
 			}
@@ -771,12 +804,17 @@ namespace rt {
 
 			// create image
 			_workers.emplace_back([this]() {
-				std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
 				while (_continue) {
-					// Stopwatch sw;
-					create_color_image();
-					// printf("create_color_image: %f\n", sw.elapsed());
+					int max_step = 0;
+					for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+						max_step = std::max(max_step, _wavefront_lanes[i]->step_count());
+					}
+					if (2 < max_step) {
+						create_color_image();
+					}
+					else {
+						std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					}
 				}
 			});
 		}
@@ -797,9 +835,9 @@ namespace rt {
 			create_color_image();
 		}
 
-		void re_start() {
+		void re_start(const houdini_alembic::CameraObject &camera) {
 			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-				_wavefront_lanes[i]->re_start(i);
+				_wavefront_lanes[i]->re_start(i, camera);
 			}
 		}
 

@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include "ofMain.h"
+
+#include "ofxOsc.h"
 #include "houdini_alembic.hpp"
 #include "alembic_preview.hpp"
 
@@ -29,4 +31,6 @@ public:
 
 	ofMesh _camera_model;
 	std::shared_ptr<houdini_alembic::AlembicScene> _alembicscene;
+
+	ofxOscReceiver _osc;
 };

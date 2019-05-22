@@ -7,29 +7,50 @@
     <ClCompile Include="src\main.cpp">
       <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_demo.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="src\main.cpp">
+      <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_draw.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="src\ofApp.cpp">
+      <Filter>src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_glfw.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="..\..\..\addons\ofxOsc\src\ofxOscBundle.cpp">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl2.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="..\..\..\addons\ofxOsc\src\ofxOscMessage.cpp">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl3.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="..\..\..\addons\ofxOsc\src\ofxOscParameterSync.cpp">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_widgets.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="..\..\..\addons\ofxOsc\src\ofxOscReceiver.cpp">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="..\..\..\addons\ofxOsc\src\ofxOscSender.cpp">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui.cpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\IpEndpointName.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\win32\NetworkingUtils.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip\win32</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\win32\UdpSocket.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip\win32</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscOutboundPacketStream.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscPrintReceivedElements.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscReceivedElements.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscTypes.cpp">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\houdini_alembic\houdini_alembic.cpp">
+      <Filter>src\houdini_alembic</Filter>
     </ClCompile>
     <ClCompile Include="..\libs\abc\Alembic\Abc\ArchiveInfo_Abc.cpp">
       <Filter>src\abc</Filter>
@@ -409,57 +430,144 @@
     <ClCompile Include="..\libs\abc\ImathVec_ImathVec.cpp">
       <Filter>src\abc</Filter>
     </ClCompile>
-    <ClCompile Include="..\libs\houdini_alembic\houdini_alembic.cpp">
-      <Filter>src\houdini_alembic</Filter>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_demo.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_draw.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_glfw.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl2.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl3.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_widgets.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClCompile>
+    <ClCompile Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.cpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">
       <UniqueIdentifier>{d8376475-7454-4a24-b08a-aac121d3ad6f}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\ofxRaccoonImGui">
-      <UniqueIdentifier>{abc5a0fc-20d6-4942-b238-9b8a5eca6a0a}</UniqueIdentifier>
+    <Filter Include="addons">
+      <UniqueIdentifier>{71834F65-F3A9-211E-73B8-DC85}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\abc">
-      <UniqueIdentifier>{cea5f4e8-4a8b-44f4-8015-7b0fd22922ae}</UniqueIdentifier>
+    <Filter Include="addons\ofxOsc">
+      <UniqueIdentifier>{D91DCA33-6E5D-4481-2AEC-9FBB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\src">
+      <UniqueIdentifier>{B9DD339A-D93D-92A1-0A2F-4B41}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\libs">
+      <UniqueIdentifier>{99ECA1D9-873F-4622-8FC0-FC7B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\libs\oscpack">
+      <UniqueIdentifier>{D3A98534-1602-4FEF-57A6-6593}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\libs\oscpack\src">
+      <UniqueIdentifier>{BFB5BB47-98C8-BBCB-3066-1046}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\libs\oscpack\src\ip">
+      <UniqueIdentifier>{5A029128-EB41-95C5-CBC0-CDED}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\libs\oscpack\src\ip\win32">
+      <UniqueIdentifier>{79DFDFE2-400B-8654-3675-01A3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="addons\ofxOsc\libs\oscpack\src\osc">
+      <UniqueIdentifier>{EDACB89C-9768-9551-4D41-B590}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\houdini_alembic">
-      <UniqueIdentifier>{f4f29cd4-5a45-4c84-9d03-4a294b5a3609}</UniqueIdentifier>
+      <UniqueIdentifier>{fbb47aaa-27b5-454d-8431-ee4e07d93c6a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\abc">
+      <UniqueIdentifier>{e0fe53d7-0c6e-45f7-81ae-a50c3eb4e99b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\ofxRaccoonImGui">
+      <UniqueIdentifier>{1c33151f-913a-45cd-9661-2f09b394070b}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\ofApp.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="src\ofApp.h">
+      <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_glfw.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOsc.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl2.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOscArg.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl3.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOscBundle.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_internal.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOscMessage.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_rectpack.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOscParameterSync.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_textedit.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOscReceiver.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_truetype.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\src\ofxOscSender.h">
+      <Filter>addons\ofxOsc\src</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.hpp">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\IpEndpointName.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\ofxRaccoonImGui\imconfig.h">
-      <Filter>src\ofxRaccoonImGui</Filter>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\NetworkingUtils.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\PacketListener.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\TimerListener.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\ip\UdpSocket.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\ip</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\MessageMappingOscPacketListener.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscException.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscHostEndianness.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscOutboundPacketStream.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscPacketListener.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscPrintReceivedElements.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscReceivedElements.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\addons\ofxOsc\libs\oscpack\src\osc\OscTypes.h">
+      <Filter>addons\ofxOsc\libs\oscpack\src\osc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\houdini_alembic\alembic_preview.hpp">
+      <Filter>src\houdini_alembic</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\houdini_alembic\houdini_alembic.hpp">
+      <Filter>src\houdini_alembic</Filter>
     </ClInclude>
     <ClInclude Include="..\libs\abc\Alembic\Abc\All.h">
       <Filter>src\abc</Filter>
@@ -1103,19 +1211,38 @@
     <ClInclude Include="..\libs\abc\toFloat.h">
       <Filter>src\abc</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\houdini_alembic\alembic_preview.hpp">
-      <Filter>src\houdini_alembic</Filter>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imconfig.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
     </ClInclude>
-    <ClInclude Include="..\libs\houdini_alembic\houdini_alembic.hpp">
-      <Filter>src\houdini_alembic</Filter>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_glfw.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl2.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_impl_opengl3.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imgui_internal.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_rectpack.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_textedit.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\imstb_truetype.h">
+      <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.hpp">
+      <Filter>src\ofxRaccoonImGui</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="icon.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="..\libs\ofxRaccoonImGui\LICENSE.txt">
-      <Filter>src\ofxRaccoonImGui</Filter>
-    </Text>
   </ItemGroup>
 </Project>

@@ -22,6 +22,7 @@ float pdf_cosine_weighted_hemisphere_z_up(float3 sampled_wi) {
 }
 
 // Building an Orthonormal Basis, Revisited
+// Z up
 void get_orthonormal_basis(float3 zaxis, float3 *xaxis, float3 *yaxis) {
 	const float sign = copysign(1.0f, zaxis.z);
 	const float a = -1.0f / (sign + zaxis.z);
@@ -82,7 +83,7 @@ __kernel void lambertian(
     shading_results[path_index].Le = (float3)(0.0f);
     shading_results[path_index].T = T;
 
-    ro = ro + rd * tmin + Ng * 1.0e-4f;
+    ro = ro + rd * tmin + wi * 1.0e-5f + Ng * 1.0e-5f;
     rd = wi;
     
     wavefrontPath[path_index].ro = ro;

@@ -76,17 +76,9 @@ void ofApp::setup() {
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
-
-	//pt->_wavefront_lanes[0]->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
-	//	colorReciever.setImageAtomic(p, w, h);
-	//};
-	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
-	//	normalReciever.setImageAtomic(p, w, h);
-	//};
-
 	pt->launch();
 
-	//pt->launch_fixed(10);
+	_osc.setup(8000);
 }
 void ofApp::exit() {
 	delete pt;
@@ -95,7 +87,40 @@ void ofApp::exit() {
 
 //--------------------------------------------------------------
 void ofApp::update() {
+	while (_osc.hasWaitingMessages()) {
+		ofxOscMessage m;
+		_osc.getNextMessage(m);
+		if (m.getAddress() == "/camera") {
+			auto camera = houdini_alembic::CameraObject(*pt->_camera);
 
+			glm::mat4 xform;
+			for (int i = 0; i < 16; ++i) {
+				glm::value_ptr(xform)[i] = m.getArgAsFloat(i);
+			}
+			glm::mat3 rot = glm::inverseTranspose(xform);
+
+			auto to = [](glm::vec3 p) { return houdini_alembic::Vector3f(p.x, p.y, p.z); };
+			glm::vec3 eye = xform * glm::vec4(0, 0, 0, 1);
+			glm::vec3 up = rot * glm::vec3(0, 1, 0);
+			glm::vec3 right = rot * glm::vec3(1, 0, 0);
+			glm::vec3 forward = rot * glm::vec3(0, 0, -1);
+			camera.eye = to(eye);
+			camera.up = to(up);
+			camera.down = to(-up);
+			camera.forward = to(forward);
+			camera.back = to(-forward);
+			camera.right = to(right);
+			camera.left = to(-right);
+			camera.lookat = to(eye + forward);
+			std::copy(glm::value_ptr(xform), glm::value_ptr(xform) + 16, camera.combinedXforms.value_ptr());
+			camera.xforms.clear();
+			camera.xforms.push_back(camera.combinedXforms);
+
+			*pt->_camera = camera;
+
+			pt->re_start(camera);
+		}
+	}
 }
 
 //--------------------------------------------------------------
@@ -187,9 +212,7 @@ void ofApp::draw() {
 
 //--------------------------------------------------------------
 void ofApp::keyPressed(int key){
-	if (key == 'r') {
-		pt->re_start();
-	}
+
 }
 
 //--------------------------------------------------------------

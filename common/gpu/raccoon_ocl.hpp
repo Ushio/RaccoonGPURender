@@ -147,6 +147,8 @@ namespace rt {
 	//	delete callback;
 	//}
 
+
+
 	class OpenCLEvent {
 	public:
 		OpenCLEvent(cl_event e) :_event(e, clReleaseEvent) { }
@@ -211,7 +213,7 @@ namespace rt {
 		OpenCLCustomEvent(const OpenCLCustomEvent &) = delete;
 		void operator=(const OpenCLCustomEvent &) = delete;
 
-		void enqueue_barrier(cl_command_queue queue) {
+		void enqueue_marker(cl_command_queue queue) {
 			cl_event e = _custom_event.get();
 			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, nullptr);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
@@ -223,6 +225,13 @@ namespace rt {
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _custom_event;
 	};
+
+	inline std::shared_ptr<OpenCLEvent> enqueue_marker(cl_command_queue queue) {
+		cl_event marker_event;
+		cl_int status = clEnqueueMarker(queue, &marker_event);
+		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMarker() failed");
+		return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(marker_event));
+	}
 	
 	class OpenCLEventList {
 	public:

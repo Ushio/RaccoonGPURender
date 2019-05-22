@@ -3,6 +3,7 @@
 #include "raccoon_ocl.hpp"
 #include "peseudo_random.hpp"
 #include "wavefront_path_tracing.hpp"
+
 using namespace rt;
 
 OpenCLContext *context_ptr;
@@ -17,6 +18,7 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
+			// ofSaveImage(_imagedata, "render.png");
 		}
 		_dirty = true;
 	}
@@ -71,16 +73,20 @@ void ofApp::setup() {
 		printf("sample error_message: %s\n", error_message.c_str());
 	}
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
-	pt->_wavefront_lanes[0]->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
+	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
-	pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
-		normalReciever.setImageAtomic(p, w, h);
-	};
-	pt->_wavefront_lanes[0]->onColorAccumRecieved = [](RGB32AccumulationValueType *p, int w, int h) {
 
-	};
+	//pt->_wavefront_lanes[0]->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
+	//	colorReciever.setImageAtomic(p, w, h);
+	//};
+	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
+	//	normalReciever.setImageAtomic(p, w, h);
+	//};
+
 	pt->launch();
+
+	//pt->launch_fixed(10);
 }
 void ofApp::exit() {
 	delete pt;
@@ -159,6 +165,7 @@ void ofApp::draw() {
 			ImGui::Text(info.version.c_str());
 			ImGui::TextWrapped(info.extensions.c_str());
 			ImGui::Text("type : %s", info.is_gpu ? "GPU" : "CPU");
+			ImGui::Text("has unified memory : %s", info.has_unified_memory ? "YES" : "NO");
 		});
 	}
 

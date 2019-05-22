@@ -74,15 +74,15 @@ namespace rt {
 				}
 			}
 
-			buffer->mtvbhCL = std::unique_ptr<OpenCLBuffer<MTBVHNodeWithoutLink>>(new OpenCLBuffer<MTBVHNodeWithoutLink>(context, mtbvhCL.data(), mtbvhCL.size()));
-			buffer->linksCL = std::unique_ptr<OpenCLBuffer<int32_t>>(new OpenCLBuffer<int32_t>(context, linksCL.data(), linksCL.size()));
-			buffer->primitive_indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _primitive_indices.data(), _primitive_indices.size()));
-			buffer->indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _indices.data(), _indices.size()));
+			buffer->mtvbhCL = std::unique_ptr<OpenCLBuffer<MTBVHNodeWithoutLink>>(new OpenCLBuffer<MTBVHNodeWithoutLink>(context, mtbvhCL.data(), mtbvhCL.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->linksCL = std::unique_ptr<OpenCLBuffer<int32_t>>(new OpenCLBuffer<int32_t>(context, linksCL.data(), linksCL.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->primitive_indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _primitive_indices.data(), _primitive_indices.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _indices.data(), _indices.size(), OpenCLKernelBufferMode::ReadOnly));
 			std::vector<OpenCLFloat3> points(_points.size());
 			for (int i = 0; i < _points.size(); ++i) {
 				points[i] = _points[i];
 			}
-			buffer->pointsCL = std::unique_ptr<OpenCLBuffer<OpenCLFloat3>>(new OpenCLBuffer<OpenCLFloat3>(context, points.data(), points.size()));
+			buffer->pointsCL = std::unique_ptr<OpenCLBuffer<OpenCLFloat3>>(new OpenCLBuffer<OpenCLFloat3>(context, points.data(), points.size(), OpenCLKernelBufferMode::ReadOnly));
 			return buffer;
 		}
 

@@ -12,11 +12,29 @@
 #include "assertion.hpp"
 
 namespace rt {
+	static const uint16_t kHalfZero = glm::packHalf(glm::vec1(0.0f)).x;
+	struct alignas(8) OpenCLHalf4 {
+		uint16_t x;
+		uint16_t y;
+		uint16_t z;
+		uint16_t w;
+		OpenCLHalf4() :x(kHalfZero), y(kHalfZero), z(kHalfZero), w(kHalfZero) {}
+		OpenCLHalf4(const glm::vec4 &v) {
+			auto h = glm::packHalf(v);
+			x = h.x;
+			y = h.y;
+			z = h.z;
+			w = h.w;
+		}
+		glm::vec4 as_float() const {
+			return glm::unpackHalf(glm::u16vec4(x, y, z, w));
+		}
+	};
 
 	struct alignas(8) OpenCLUInt2 {
 		uint32_t x;
 		uint32_t y;
-		OpenCLUInt2() {}
+		OpenCLUInt2() :x(0), y(0){}
 		OpenCLUInt2(const glm::uvec2 &v)
 			: x(v.x)
 			, y(v.y){
@@ -32,7 +50,7 @@ namespace rt {
 		float z;
 		char align[4];
 
-		OpenCLFloat3() {}
+		OpenCLFloat3() :x(0.0f), y(0.0f), z(0.0f) {}
 		OpenCLFloat3(const glm::vec3 &v)
 			: x(v.x)
 			, y(v.y)
@@ -53,7 +71,7 @@ namespace rt {
 		float z;
 		float w;
 
-		OpenCLFloat4() {}
+		OpenCLFloat4():x(0.0f), y(0.0f), z(0.0f), w(0.0f) {}
 		OpenCLFloat4(const glm::vec3 &v)
 			: x(v.x)
 			, y(v.y)
@@ -172,6 +190,13 @@ namespace rt {
 		//	cl_int status = clSetEventCallback(_event.get(), CL_COMPLETE, on_event_completed, callback);
 		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "set_event_callback() failed");
 		//}
+		void enqueue_wait(cl_command_queue queue) {
+			cl_event e = _event.get();
+			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, nullptr);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
+			status = clFlush(queue);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
 	};
@@ -217,24 +242,46 @@ namespace rt {
 		std::vector<cl_event> _events;
 	};
 
+	enum class OpenCLKernelBufferMode {
+		ReadWrite,
+		ReadOnly,
+		WriteOnly,
+	};
+	enum class OpenCLPinnedBufferMode {
+		ReadOnly,
+		WriteOnly,
+	};
+
 	template <class T>
-	class OpenCLPinnedBufferForRead {
+	class OpenCLPinnedBuffer {
 	public:
-		OpenCLPinnedBufferForRead(cl_context context, cl_command_queue queue, uint32_t length)
+		OpenCLPinnedBuffer(cl_context context, cl_command_queue queue, uint32_t length, OpenCLPinnedBufferMode mode)
 			: _context(context)
 			, _queue(queue)
-			, _length(length) {
+			, _length(length)
+			, _mode(mode) {
 
+			cl_map_flags map_flags;
+			switch (mode) {
+			case OpenCLPinnedBufferMode::ReadOnly:
+				map_flags = CL_MAP_READ;
+				break;
+			case OpenCLPinnedBufferMode::WriteOnly:
+				map_flags = CL_MAP_WRITE_INVALIDATE_REGION;
+				break;
+			default:
+				RT_ASSERT(0);
+			}
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, length * sizeof(T), nullptr, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
 			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 
-			_ptr = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, nullptr, &status);
+			_ptr = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, map_flags, 0, _length * sizeof(T), 0, nullptr, nullptr, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMapBuffer() failed");
 		}
-		~OpenCLPinnedBufferForRead() {
+		~OpenCLPinnedBuffer() {
 			cl_int status = clEnqueueUnmapMemObject(_queue, _memory.get(), _ptr, 0, nullptr, nullptr);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
 		}
@@ -244,7 +291,11 @@ namespace rt {
 		T *ptr() {
 			return _ptr;
 		}
+		OpenCLPinnedBufferMode mode() const {
+			return _mode;
+		}
 	private:
+		OpenCLPinnedBufferMode _mode;
 		cl_context _context;
 		cl_command_queue _queue;
 		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
@@ -255,23 +306,50 @@ namespace rt {
 	template <class T>
 	class OpenCLBuffer {
 	public:
-		OpenCLBuffer(cl_context context, const T *value, uint32_t length)
+		OpenCLBuffer(cl_context context, const T *value, uint32_t length, OpenCLKernelBufferMode mode)
 			: _context(context)
 			, _length(length) {
 
+			cl_mem_flags mem_flags = CL_MEM_READ_WRITE;
+			switch (mode) {
+			case OpenCLKernelBufferMode::ReadWrite:
+				mem_flags = CL_MEM_READ_WRITE;
+				break;
+			case OpenCLKernelBufferMode::ReadOnly:
+				mem_flags = CL_MEM_READ_ONLY;
+				break;
+			case OpenCLKernelBufferMode::WriteOnly:
+				mem_flags = CL_MEM_WRITE_ONLY;
+				break;
+			default:
+				RT_ASSERT(0);
+			}
+
 			// http://wiki.tommy6.net/wiki/clCreateBuffer
 			cl_int status;
-			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);
+			cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
 			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 		}
-		OpenCLBuffer(cl_context context, uint32_t length)
+		OpenCLBuffer(cl_context context, uint32_t length, OpenCLKernelBufferMode mode)
 			: _context(context)
 			, _length(length) {
 
+			cl_mem_flags mem_flags = CL_MEM_READ_WRITE;
+			switch (mode) {
+			case OpenCLKernelBufferMode::ReadWrite:
+				mem_flags = CL_MEM_READ_WRITE;
+				break;
+			case OpenCLKernelBufferMode::ReadOnly:
+				mem_flags = CL_MEM_READ_ONLY;
+				break;
+			default:
+				RT_ASSERT(0);
+			}
+
 			cl_int status;
-			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE, length * sizeof(T), nullptr, &status);
+			cl_mem memory = clCreateBuffer(context, mem_flags, length * sizeof(T), nullptr, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
 			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
@@ -308,17 +386,29 @@ namespace rt {
 			return _length;
 		}
 
-		std::shared_ptr<OpenCLEvent> copy_to_host(OpenCLPinnedBufferForRead<T> *value, cl_command_queue queue, cl_event event_wait) {
+		std::shared_ptr<OpenCLEvent> copy_to_host(OpenCLPinnedBuffer<T> *value, cl_command_queue queue) {
 			cl_event copy_event;
-			OpenCLEventList event_list;
-			if (event_wait) {
-				event_list.add(event_wait);
-			}
-			cl_int status = clEnqueueReadBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), event_list.size(), event_list.events(), &copy_event);
+			cl_int status = clEnqueueReadBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), 0, nullptr, &copy_event);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			clFlush(queue);
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(copy_event));
 		}
+		std::shared_ptr<OpenCLEvent> copy_to_device(OpenCLPinnedBuffer<T> *value, cl_command_queue queue) {
+			cl_event copy_event;
+			cl_int status = clEnqueueWriteBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), 0, nullptr, &copy_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			status = clFlush(queue);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(copy_event));
+		}
+
+		std::shared_ptr<OpenCLEvent> fill(T value, cl_command_queue queue) {
+			cl_event fill_event;
+			cl_int status = clEnqueueFillBuffer(queue, _memory.get(), &value, sizeof(T), 0, _length * sizeof(T), 0, nullptr, &fill_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueFillBuffer() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(fill_event));
+		}
+
 	private:
 		cl_context _context;
 		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
@@ -330,8 +420,24 @@ namespace rt {
 		cl_device_id device_id = nullptr;
 		cl_context context = nullptr;
 		cl_command_queue queue = nullptr;
-		cl_command_queue queue_data_transfer = nullptr;
 		bool is_gpu = true;
+		bool is_dGPU = false;
+	};
+
+	class OpenCLQueue {
+	public:
+		OpenCLQueue(cl_context context, cl_device_id device_id) {
+			cl_int status;
+			cl_command_queue queue = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
+			REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
+			_queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
+		}
+		cl_command_queue queue() {
+			return _queue.get();
+		}
+	private:
+		std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
 	};
 
 	class OpenCLContext {
@@ -348,6 +454,7 @@ namespace rt {
 			std::string version;
 			std::string extensions;
 			bool is_gpu;
+			bool has_unified_memory;
 		};
 		OpenCLContext() {
 			cl_int status;
@@ -395,6 +502,11 @@ namespace rt {
 					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 					device_info.is_gpu = (device_type & CL_DEVICE_TYPE_GPU) != 0;
 
+					cl_bool has_unified_memory;
+					status = clGetDeviceInfo(device_id, CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(has_unified_memory), &has_unified_memory, nullptr);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					device_info.has_unified_memory = has_unified_memory != 0;
+
 					DeviceContext deviceContext;
 					deviceContext.platform_info = platform_info;
 					deviceContext.device_info = device_info;
@@ -410,12 +522,7 @@ namespace rt {
 					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
 					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
 					deviceContext.queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
-
-					cl_command_queue queue_data_transfer = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &status);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
-					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
-					deviceContext.queue_data_transfer = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue_data_transfer, clReleaseCommandQueue);
-
+			
 					_deviceContexts.push_back(deviceContext);
 				}
 			}
@@ -443,9 +550,9 @@ namespace rt {
 			OpenCLLane lane;
 			lane.device_id = _deviceContexts[index].device_id;
 			lane.queue     = _deviceContexts[index].queue.get();
-			lane.queue_data_transfer = _deviceContexts[index].queue_data_transfer.get();
 			lane.context   = _deviceContexts[index].context.get();
 			lane.is_gpu    = _deviceContexts[index].device_info.is_gpu;
+			lane.is_dGPU = _deviceContexts[index].device_info.has_unified_memory == false;
 			return lane;
 		}
 		PlatformInfo platform_info(int index) const {
@@ -463,7 +570,6 @@ namespace rt {
 			cl_device_id device_id = nullptr;
 			std::shared_ptr<std::remove_pointer<cl_context>::type> context;
 			std::shared_ptr<std::remove_pointer<cl_command_queue>::type> queue;
-			std::shared_ptr<std::remove_pointer<cl_command_queue>::type> queue_data_transfer;
 		};
 		std::vector<DeviceContext> _deviceContexts;
 	};

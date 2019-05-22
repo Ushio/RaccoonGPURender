@@ -26,6 +26,13 @@ typedef __attribute__ ((aligned(16))) struct {
     float g;
     float b;
     float sampleCount;
-} RGB24AccumulationValueType;
+} RGB32AccumulationValueType;
+
+typedef __attribute__ ((aligned(8))) struct {
+    half r_divided;
+    half g_divided;
+    half b_divided;
+    half sampleCount;
+} RGB16AccumulationValueType;
 
 #endif

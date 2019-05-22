@@ -27,8 +27,8 @@ __kernel void logic(
     __global uint4 *random_states,
     __global ExtensionResult *extension_results,
     __global ShadingResult *shading_results,
-    __global RGB24AccumulationValueType *rgb24accum,
-    __global RGB24AccumulationValueType *normal24accum,
+    __global RGB32AccumulationValueType *rgb32accum,
+    __global RGB32AccumulationValueType *normal32accum,
     __global uint *new_path_queue_item,
     __global uint *new_path_queue_count,
     __global uint *lambertian_queue_item, 
@@ -74,10 +74,10 @@ __kernel void logic(
             color = extension_results[gid].Ng;
         }
         uint pixel_index = wavefrontPath[gid].pixel_index;
-        atomic_add_global(&normal24accum[pixel_index].r, color.x);
-        atomic_add_global(&normal24accum[pixel_index].g, color.y);
-        atomic_add_global(&normal24accum[pixel_index].b, color.z);
-        atomic_add_global(&normal24accum[pixel_index].sampleCount, 1.0f);
+        atomic_add_global(&normal32accum[pixel_index].r, color.x);
+        atomic_add_global(&normal32accum[pixel_index].g, color.y);
+        atomic_add_global(&normal32accum[pixel_index].b, color.z);
+        atomic_add_global(&normal32accum[pixel_index].sampleCount, 1.0f);
     }
 
     if(newPath) {
@@ -88,10 +88,10 @@ __kernel void logic(
         float3 L = wavefrontPath[gid].L;
         if(all(isfinite(L))) {
             uint pixel_index = wavefrontPath[gid].pixel_index;
-            atomic_add_global(&rgb24accum[pixel_index].r, L.x);
-            atomic_add_global(&rgb24accum[pixel_index].g, L.y);
-            atomic_add_global(&rgb24accum[pixel_index].b, L.z);
-            atomic_add_global(&rgb24accum[pixel_index].sampleCount, 1.0f);
+            atomic_add_global(&rgb32accum[pixel_index].r, L.x);
+            atomic_add_global(&rgb32accum[pixel_index].g, L.y);
+            atomic_add_global(&rgb32accum[pixel_index].b, L.z);
+            atomic_add_global(&rgb32accum[pixel_index].sampleCount, 1.0f);
         } else {
             // TODO
         }

@@ -80,11 +80,8 @@ __kernel void logic(
         atomic_add_global(&normal32accum[pixel_index].sampleCount, 1.0f);
     }
 
+    // add contribution
     if(newPath) {
-        // No hit, so add to new path queue. 
-        uint queue_index = atomic_inc(new_path_queue_count);
-        new_path_queue_item[queue_index] = gid;
-        
         float3 L = wavefrontPath[gid].L;
         if(all(isfinite(L))) {
             uint pixel_index = wavefrontPath[gid].pixel_index;
@@ -95,9 +92,55 @@ __kernel void logic(
         } else {
             // TODO
         }
+    }
+
+    // add queue process (naive) 
+    // if(newPath) {
+    //     // No hit, so add to new path queue. 
+    //     uint queue_index = atomic_inc(new_path_queue_count);
+    //     new_path_queue_item[queue_index] = gid;
+    // } else {
+    //     // evaluate material
+    //     uint queue_index = atomic_inc(lambertian_queue_count);
+    //     lambertian_queue_item[queue_index] = gid;
+    // }
+
+    // add queue process (2 stage ver)
+    __local uint local_new_path_queue_count;
+    __local uint local_lambertian_queue_count;
+
+    if(get_local_id(0) == 0) { 
+        local_new_path_queue_count = 0; 
+        local_lambertian_queue_count = 0;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    uint local_new_path_queue_index = 0;
+    uint local_lambertian_queue_index = 0;
+
+    if(newPath) {
+        local_new_path_queue_index = atomic_inc(&local_new_path_queue_count);
     } else {
-        // evaluate material
-        uint queue_index = atomic_inc(lambertian_queue_count);
+        local_lambertian_queue_index = atomic_inc(&local_lambertian_queue_count);
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    __local uint local_offset_new_path_queue_count;
+    __local uint local_offset_lambertian_queue_count;
+
+    if(get_local_id(0) == 0) {
+        local_offset_new_path_queue_count = atom_add(new_path_queue_count, local_new_path_queue_count);
+        local_offset_lambertian_queue_count = atom_add(lambertian_queue_count, local_lambertian_queue_count);
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if(newPath) {
+        uint queue_index = local_new_path_queue_index + local_offset_new_path_queue_count;
+        new_path_queue_item[queue_index] = gid;
+    } else {
+        uint queue_index = local_lambertian_queue_index + local_offset_lambertian_queue_count;
         lambertian_queue_item[queue_index] = gid;
     }
 }

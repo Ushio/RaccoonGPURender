@@ -712,21 +712,7 @@ namespace rt {
 			_sceneManager.buildBVH();
 
 			// ALL Device
-			for (int i = 0; i < context->deviceCount(); ++i) {
-				auto lane = context->lane(i);
-				if (lane.is_gpu == false) {
-					continue;
-				}
-				if (lane.is_dGPU == false) {
-					continue;
-				}
-				int wavefront = lane.is_dGPU ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-				wavefront_lane->initialize(i);
-				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-			}
-
-			//for (int i = 0; i < 1; ++i) {
+			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);
 			//	if (lane.is_gpu == false) {
 			//		continue;
@@ -739,6 +725,20 @@ namespace rt {
 			//	wavefront_lane->initialize(i);
 			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			//}
+
+			for (int i = 0; i < 1; ++i) {
+				auto lane = context->lane(i);
+				if (lane.is_gpu == false) {
+					continue;
+				}
+				if (lane.is_dGPU == false) {
+					continue;
+				}
+				int wavefront = lane.is_dGPU ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
+				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
+				wavefront_lane->initialize(i);
+				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			}
 
 			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);

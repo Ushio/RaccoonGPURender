@@ -130,8 +130,8 @@ __kernel void logic(
     __local uint local_offset_lambertian_queue_count;
 
     if(get_local_id(0) == 0) {
-        local_offset_new_path_queue_count = atom_add(new_path_queue_count, local_new_path_queue_count);
-        local_offset_lambertian_queue_count = atom_add(lambertian_queue_count, local_lambertian_queue_count);
+        local_offset_new_path_queue_count = atomic_add(new_path_queue_count, local_new_path_queue_count);
+        local_offset_lambertian_queue_count = atomic_add(lambertian_queue_count, local_lambertian_queue_count);
     }
 
     barrier(CLK_LOCAL_MEM_FENCE);

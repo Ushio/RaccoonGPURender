@@ -56,7 +56,7 @@ inline bool intersect_ray_triangle(float3 ro, float3 rd, float3 v0, float3 v1, f
 	// float v = dot(rd, qvec) * invDet;
 	// float t = dot(v0v2, qvec) * invDet;
 
-	// const float kEpsilon = 1.0e-5;
+	// const float kEpsilon = 1.0e-8;
 	// if (kEpsilon < fabs(det) && 0.0f < u && 0.0f < v && u + v < 1.0f && 0.0f < t & t < *tmin) {
 	// 	*tmin = t;
 	// 	*uv = (float2)(u, v);

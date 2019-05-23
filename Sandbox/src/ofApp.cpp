@@ -80,6 +80,7 @@ void ofApp::setup() {
 		normalReciever.setImageAtomic(p, w, h);
 	};
 	pt->launch();
+	// pt->launch_fixed(2);
 
 	_osc.setup(8000);
 }
@@ -197,6 +198,17 @@ void ofApp::draw() {
 			ImGui::Text("has unified memory : %s", info.has_unified_memory ? "YES" : "NO");
 		});
 	}
+	ofxRaccoonImGui::Tree("Render Stat", true, [&]() {
+		ImGui::Text("elapsed : %.1f s", pt->stopwatch_after_launch.elapsed());
+
+		for (int i = 0; i < pt->_wavefront_lanes.size(); ++i) {
+			auto wavefront = pt->_wavefront_lanes[i].get();
+			float avg_spp = wavefront->stat_avg_sample();
+			ofxRaccoonImGui::Tree(wavefront->lane().device_name.c_str(), true, [&]() {
+				ImGui::Text("avg spp : %.1f", avg_spp);
+			});
+		}
+	});
 
 	ImGui::End();
 

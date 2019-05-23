@@ -362,6 +362,9 @@ namespace rt {
 		int size() const {
 			return _buffer->size();
 		}
+		std::shared_ptr<OpenCLEvent> fill(T value, cl_command_queue queue) {
+			return _buffer->fill(value, queue);
+		}
 	private:
 		std::unique_ptr<ReadableBuffer<T>> _buffer;
 		std::shared_ptr<OpenCLCustomEvent> _previous_cpu_task_done_event;
@@ -440,6 +443,13 @@ namespace rt {
 			_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
 			_kernel_tonemap->setArgument(0, _accum_color_intermediate->memory());
 			_kernel_tonemap->setArgument(1, _final_color->memory());
+
+			// Stat
+			_all_sample_count = unique(new PeriodicReadableBuffer<uint32_t>(lane.context, lane.queue, 2));
+			OpenCLProgram program_stat("stat.cl", lane.context, lane.device_id);
+			_kernel_stat = unique(new OpenCLKernel("stat", program_stat.program()));
+
+			_avg_sample = 0;
 		}
 		~WavefrontLane() {
 			_worker.wait();
@@ -460,6 +470,8 @@ namespace rt {
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), _lane.queue);
 			_accum_normal->fill(RGB32AccumulationValueType(), _lane.queue);
+
+			_avg_sample = 0;
 		}
 
 		void step() {
@@ -550,6 +562,21 @@ namespace rt {
 					f(ptr, w, h);
 				});
 			}
+
+			// for stat
+			_all_sample_count->mark_begin_touch(_lane.queue);
+
+			_all_sample_count->fill(0, _lane.queue);
+			_kernel_stat->setArgument(0, _accum_color->memory());
+			_kernel_stat->setArgument(1, _all_sample_count->memory());
+			_eventQueue += _kernel_stat->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
+
+			int w = _camera.resolution_x;
+			int h = _camera.resolution_y;
+			_all_sample_count->mark_end_touch_and_schedule_read(_lane.context, _eventQueue.last_event(), _data_transfer0->queue(), [w, h, this](uint32_t *ptr) {
+				uint64_t all_sample_count = (uint64_t)ptr[0] + (uint64_t)ptr[1] * 4294967296llu;
+				_avg_sample = (float)((double)all_sample_count / (w * h));
+			});
 		}
 		std::shared_ptr<OpenCLEvent> create_color_intermediate() {
 			return _kernel_accumlation_to_intermediate->launch(_lane.queue, 0, _accum_color_intermediate->size());
@@ -642,6 +669,8 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_merge_intermediate;
 		std::unique_ptr<OpenCLKernel> _kernel_tonemap;
 
+		std::unique_ptr<OpenCLKernel> _kernel_stat;
+
 		// buffers
 		std::unique_ptr<OpenCLBuffer<glm::uvec4>> _mem_random_state;
 		std::unique_ptr<OpenCLBuffer<WavefrontPath>> _mem_path;
@@ -685,6 +714,13 @@ namespace rt {
 		RestartParameter _restart_parameter;
 		int _step_count = 0;
 		std::mutex _restart_mutex;
+
+		// stats
+		float stat_avg_sample() const {
+			return _avg_sample;
+		}
+		std::atomic<float> _avg_sample;
+		std::unique_ptr<PeriodicReadableBuffer<uint32_t>> _all_sample_count;
 	};
 
 	class WavefrontPathTracing {
@@ -712,7 +748,21 @@ namespace rt {
 			_sceneManager.buildBVH();
 
 			// ALL Device
-			//for (int i = 0; i < context->deviceCount(); ++i) {
+			for (int i = 0; i < context->deviceCount(); ++i) {
+				auto lane = context->lane(i);
+				//if (lane.is_gpu == false) {
+				//	continue;
+				//}
+				//if (lane.is_discrete_memory == false) {
+				//	continue;
+				//}
+				int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
+				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
+				wavefront_lane->initialize(i);
+				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			}
+
+			//for (int i = 0; i < 1; ++i) {
 			//	auto lane = context->lane(i);
 			//	if (lane.is_gpu == false) {
 			//		continue;
@@ -725,20 +775,6 @@ namespace rt {
 			//	wavefront_lane->initialize(i);
 			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			//}
-
-			for (int i = 0; i < 1; ++i) {
-				auto lane = context->lane(i);
-				if (lane.is_gpu == false) {
-					continue;
-				}
-				if (lane.is_dGPU == false) {
-					continue;
-				}
-				int wavefront = lane.is_dGPU ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-				wavefront_lane->initialize(i);
-				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-			}
 
 			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);
@@ -811,6 +847,8 @@ namespace rt {
 		}
 
 		void launch() {
+			stopwatch_after_launch = Stopwatch();
+
 			_continue = true;
 
 			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
@@ -843,6 +881,8 @@ namespace rt {
 
 
 		void launch_fixed(int steps) {
+			stopwatch_after_launch = Stopwatch();
+
 			tbb::task_group g;
 			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
 				auto wavefront_lane = _wavefront_lanes[i].get();
@@ -876,5 +916,7 @@ namespace rt {
 
 		std::atomic<bool> _continue;
 		std::vector<std::thread> _workers;
+
+		Stopwatch stopwatch_after_launch;
 	};
 }

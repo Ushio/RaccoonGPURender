@@ -25,6 +25,13 @@ __kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __globa
     float sb = vload_half(0, &b[i].sampleCount);
 
     float sab = sa + sb;
+    if((int)sab == 0) {
+        vstore_half(0.0f, 0, &a[i].r_divided);
+        vstore_half(0.0f, 0, &a[i].g_divided);
+        vstore_half(0.0f, 0, &a[i].b_divided);
+        vstore_half(0.0f, 0, &a[i].sampleCount);
+        return;
+    }
     float one_over_sab = 1.0f / sab;
 
     float r_divided = (vload_half(0, &a[i].r_divided) * sa + vload_half(0, &b[i].r_divided) * sb) * one_over_sab;

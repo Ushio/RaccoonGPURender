@@ -421,11 +421,12 @@ namespace rt {
 
 	class OpenCLLane {
 	public:
+		std::string device_name;
 		cl_device_id device_id = nullptr;
 		cl_context context = nullptr;
 		cl_command_queue queue = nullptr;
 		bool is_gpu = true;
-		bool is_dGPU = false;
+		bool is_discrete_memory = false;
 	};
 
 	class OpenCLQueue {
@@ -511,6 +512,37 @@ namespace rt {
 					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 					device_info.has_unified_memory = has_unified_memory != 0;
 
+					cl_uint compute_units;
+					status = clGetDeviceInfo(device_id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, nullptr);
+					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+
+					// CL_DEVICE_PARTITION_EQUALLY
+					if (device_info.is_gpu == false) {
+						size_t partition_type_length;
+						cl_device_partition_property partitions[4];
+						status = clGetDeviceInfo(device_id, CL_DEVICE_PARTITION_PROPERTIES, sizeof(partitions), partitions, &partition_type_length);
+						bool is_support_partition = std::any_of(partitions, partitions + partition_type_length, [](cl_device_partition_property p) {
+							return p == CL_DEVICE_PARTITION_BY_COUNTS;
+						});
+						if (is_support_partition) {
+							int sub_compute_unit = compute_units / 2;
+							cl_device_partition_property pertition_properties[] = {
+								CL_DEVICE_PARTITION_BY_COUNTS, sub_compute_unit, CL_DEVICE_PARTITION_BY_COUNTS_LIST_END, 0
+							};
+							cl_device_id sub_device_id;
+							cl_uint num_devices;
+							status = clCreateSubDevices(device_id, pertition_properties, sizeof(sub_device_id), &sub_device_id, &num_devices);
+							REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateSubDevices() failed");
+							REQUIRE_OR_EXCEPTION(num_devices == 1, "clCreateSubDevices() failed");
+							
+							// override by sub device
+							device_id = sub_device_id;
+						}
+						else {
+							continue;
+						}
+					}
+
 					DeviceContext deviceContext;
 					deviceContext.platform_info = platform_info;
 					deviceContext.device_info = device_info;
@@ -552,11 +584,12 @@ namespace rt {
 		OpenCLLane lane(int index) const {
 			RT_ASSERT(0 <= index && index < _deviceContexts.size());
 			OpenCLLane lane;
+			lane.device_name = _deviceContexts[index].device_info.name;
 			lane.device_id = _deviceContexts[index].device_id;
 			lane.queue     = _deviceContexts[index].queue.get();
 			lane.context   = _deviceContexts[index].context.get();
 			lane.is_gpu    = _deviceContexts[index].device_info.is_gpu;
-			lane.is_dGPU = _deviceContexts[index].device_info.has_unified_memory == false;
+			lane.is_discrete_memory = _deviceContexts[index].device_info.has_unified_memory == false;
 			return lane;
 		}
 		PlatformInfo platform_info(int index) const {

@@ -139,16 +139,6 @@ namespace rt {
 
 #define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
 
-	//struct OpenCLEventCallback {
-	//	std::function<void(void)> onEvent;
-	//};
-	//static void on_event_completed(cl_event event, cl_int event_command_exec_status, void *user_data) {
-	//	OpenCLEventCallback *callback = (OpenCLEventCallback *)user_data;
-	//	delete callback;
-	//}
-
-
-
 	class OpenCLEvent {
 	public:
 		OpenCLEvent(cl_event e) :_event(e, clReleaseEvent) { }
@@ -186,12 +176,6 @@ namespace rt {
 			return _event.get();
 		}
 
-		//void set_event_callback(std::function<void(void)> onEvent) {
-		//	OpenCLEventCallback *callback = new OpenCLEventCallback();
-		//	callback->onEvent = onEvent;
-		//	cl_int status = clSetEventCallback(_event.get(), CL_COMPLETE, on_event_completed, callback);
-		//	REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "set_event_callback() failed");
-		//}
 		void enqueue_wait(cl_command_queue queue) {
 			cl_event e = _event.get();
 			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, nullptr);
@@ -213,15 +197,20 @@ namespace rt {
 		OpenCLCustomEvent(const OpenCLCustomEvent &) = delete;
 		void operator=(const OpenCLCustomEvent &) = delete;
 
-		void enqueue_marker(cl_command_queue queue) {
+		std::shared_ptr<OpenCLEvent> enqueue_wait_marker(cl_command_queue queue) {
 			cl_event e = _custom_event.get();
-			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, nullptr);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
+			cl_event marker_event;
+			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, &marker_event);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMarkerWithWaitList() failed");
+			status = clFlush(queue);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(marker_event));
 		}
 		void complete() {
 			cl_int status = clSetUserEventStatus(_custom_event.get(), CL_COMPLETE);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetUserEventStatus() failed");
 		}
+
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _custom_event;
 	};
@@ -230,11 +219,17 @@ namespace rt {
 		cl_event marker_event;
 		cl_int status = clEnqueueMarker(queue, &marker_event);
 		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMarker() failed");
+		status = clFlush(queue);
+		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
 		return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(marker_event));
 	}
 	
 	class OpenCLEventList {
 	public:
+		OpenCLEventList() {}
+		OpenCLEventList(cl_event e) {
+			_events.emplace_back(e);
+		}
 		void add(cl_event e) {
 			_events.emplace_back(e);
 		}
@@ -395,16 +390,16 @@ namespace rt {
 			return _length;
 		}
 
-		std::shared_ptr<OpenCLEvent> copy_to_host(OpenCLPinnedBuffer<T> *value, cl_command_queue queue) {
+		std::shared_ptr<OpenCLEvent> copy_to_host(OpenCLPinnedBuffer<T> *value, cl_command_queue queue, OpenCLEventList wait_events = OpenCLEventList()) {
 			cl_event copy_event;
-			cl_int status = clEnqueueReadBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), 0, nullptr, &copy_event);
+			cl_int status = clEnqueueReadBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), wait_events.size(), wait_events.events(), &copy_event);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			clFlush(queue);
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(copy_event));
 		}
-		std::shared_ptr<OpenCLEvent> copy_to_device(OpenCLPinnedBuffer<T> *value, cl_command_queue queue) {
+		std::shared_ptr<OpenCLEvent> copy_to_device(OpenCLPinnedBuffer<T> *value, cl_command_queue queue, OpenCLEventList wait_events = OpenCLEventList()) {
 			cl_event copy_event;
-			cl_int status = clEnqueueWriteBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), 0, nullptr, &copy_event);
+			cl_int status = clEnqueueWriteBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), wait_events.size(), wait_events.events(), &copy_event);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			status = clFlush(queue);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
@@ -672,7 +667,7 @@ namespace rt {
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
 
-		std::shared_ptr<OpenCLEvent> launch(cl_command_queue queue, uint32_t offset, uint32_t length) {
+		std::shared_ptr<OpenCLEvent> launch(cl_command_queue queue, uint32_t offset, uint32_t length, OpenCLEventList event_list = OpenCLEventList()) {
 			size_t global_work_offset[] = { offset };
 			size_t global_work_size[] = { length };
 			cl_event kernel_event;
@@ -683,7 +678,7 @@ namespace rt {
 				global_work_offset/*global_work_offset*/,
 				global_work_size  /*global_work_size*/,
 				nullptr           /*local_work_size*/,
-				0, nullptr, &kernel_event);
+				event_list.size(), event_list.events(), &kernel_event);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
 			status = clFlush(queue);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");

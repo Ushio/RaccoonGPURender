@@ -76,12 +76,16 @@ void ofApp::setup() {
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
+	pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
+		normalReciever.setImageAtomic(p, w, h);
+	};
 	pt->launch();
 
 	_osc.setup(8000);
 }
 void ofApp::exit() {
 	delete pt;
+	delete context_ptr;
 	ofxRaccoonImGui::shutdown();
 }
 

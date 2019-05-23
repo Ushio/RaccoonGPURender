@@ -280,8 +280,8 @@ namespace rt {
 			_buffer = unique(new OpenCLBuffer<T>(context, size, OpenCLKernelBufferMode::ReadWrite));
 			_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::ReadOnly));
 		}
-		std::shared_ptr<OpenCLEvent> enqueue_read(cl_command_queue queue_data_transfer) {
-			return _buffer->copy_to_host(_buffer_pinned.get(), queue_data_transfer);
+		std::shared_ptr<OpenCLEvent> enqueue_read(cl_command_queue queue_data_transfer, OpenCLEventList wait_events = OpenCLEventList()) {
+			return _buffer->copy_to_host(_buffer_pinned.get(), queue_data_transfer, wait_events);
 		}
 		cl_mem memory() const {
 			return _buffer->memory();
@@ -307,8 +307,8 @@ namespace rt {
 			_buffer = unique(new OpenCLBuffer<T>(context, size, OpenCLKernelBufferMode::ReadWrite));
 			_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::WriteOnly));
 		}
-		std::shared_ptr<OpenCLEvent> enqueue_write(cl_command_queue queue_data_transfer) {
-			return _buffer->copy_to_device(_buffer_pinned.get(), queue_data_transfer);
+		std::shared_ptr<OpenCLEvent> enqueue_write(cl_command_queue queue_data_transfer, OpenCLEventList wait_events = OpenCLEventList()) {
+			return _buffer->copy_to_device(_buffer_pinned.get(), queue_data_transfer, wait_events);
 		}
 		cl_mem memory() const {
 			return _buffer->memory();
@@ -325,6 +325,47 @@ namespace rt {
 	private:
 		std::unique_ptr<OpenCLBuffer<T>> _buffer;
 		std::unique_ptr<OpenCLPinnedBuffer<T>> _buffer_pinned;
+	};
+
+	template <class T>
+	class PeriodicReadableBuffer {
+	public:
+		PeriodicReadableBuffer(cl_context context, cl_command_queue queue, int size) {
+			_buffer = unique(new ReadableBuffer<T>(context, queue, size));
+		}
+		void mark_begin_touch(cl_command_queue queue) {
+			if (_previous_cpu_task_done_event) {
+				// begin touch marker
+				_previous_cpu_task_done_event->enqueue_wait_marker(queue);
+				_previous_cpu_task_done_event = std::shared_ptr<OpenCLCustomEvent>();
+			}
+		}
+
+		void mark_end_touch_and_schedule_read(cl_context context, std::shared_ptr<OpenCLEvent> touch_event, cl_command_queue queue_data_transfer, std::function<void(T *)> on_read_finished) {
+			_previous_cpu_task_done_event = std::shared_ptr<OpenCLCustomEvent>(new OpenCLCustomEvent(context));
+			auto cpu_task_done_event = _previous_cpu_task_done_event;
+
+			_worker.run([this, touch_event, cpu_task_done_event, queue_data_transfer, on_read_finished]() {
+				touch_event->wait();
+				auto read_event = _buffer->enqueue_read(queue_data_transfer);
+				read_event->wait();
+				on_read_finished(_buffer->ptr());
+				cpu_task_done_event->complete();
+			});
+		}
+		cl_mem memory() const {
+			return _buffer->memory();
+		}
+		T *ptr() {
+			return _buffer_pinned->ptr();
+		}
+		int size() const {
+			return _buffer->size();
+		}
+	private:
+		std::unique_ptr<ReadableBuffer<T>> _buffer;
+		std::shared_ptr<OpenCLCustomEvent> _previous_cpu_task_done_event;
+		WorkerThread _worker;
 	};
 
 	class WavefrontLane {
@@ -353,10 +394,9 @@ namespace rt {
 			_kernel_lambertian = unique(new OpenCLKernel("lambertian", program_lambertian.program()));
 			_kernel_finalize_lambertian = unique(new OpenCLKernel("finalize_lambertian", program_lambertian.program()));
 			
-			OpenCLProgram program_debug("debug.cl", lane.context, lane.device_id);
-			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_debug.program()));
-			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_debug.program()));
-			_kernel_RGB32Accumulation_to_RGBA8_tonemap_simplest = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_tonemap_simplest", program_debug.program()));
+			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
+			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
+			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
 
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -379,8 +419,9 @@ namespace rt {
 			// accumlation
 			_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
 			_accum_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
-			//_image_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
-			//_image_normal = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+			
+			// inspect
+			_inspect_normal = unique(new PeriodicReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
 			_accum_color_intermediate       = unique(new ReadableBuffer<OpenCLHalf4>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 			_accum_color_intermediate_other = unique(new WritableBuffer<OpenCLHalf4>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
@@ -401,12 +442,10 @@ namespace rt {
 			_kernel_tonemap->setArgument(1, _final_color->memory());
 		}
 		~WavefrontLane() {
-
+			_worker.wait();
 		}
 
 		void initialize(int lane_index) {
-			// enqueue_marker()
-
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
 			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
 			_kernel_random_initialize->launch(_lane.queue, 0, _wavefrontPathCount);
@@ -496,37 +535,21 @@ namespace rt {
 				_eventQueue += _kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
-			//// for previews
-			//if(onColorRecieved) {
-			//	_image_color->transfer_finish_before_touch_buffer(_lane.queue);
+			// for previews
+			if (onNormalRecieved) {
+				_inspect_normal->mark_begin_touch(_lane.queue);
 
-			//	// Process buffer
-			//	_kernel_RGB32Accumulation_to_RGBA8_tonemap_simplest->setArgument(0, _accum_color->memory());
-			//	_kernel_RGB32Accumulation_to_RGBA8_tonemap_simplest->setArgument(1, _image_color->memory());
-			//	_eventQueue += _kernel_RGB32Accumulation_to_RGBA8_tonemap_simplest->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
+				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(0, _accum_normal->memory());
+				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(1, _inspect_normal->memory());
+				_eventQueue += _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
 
-			//	auto f = onColorRecieved;
-			//	int w = _camera->resolution_x;
-			//	int h = _camera->resolution_y;
-			//	_image_color->invoke_data_transfer(_lane.context, _data_transfer0->queue(), _eventQueue.last_event()->event_object(), &_copy_worker, [f, w, h](RGBA8ValueType *ptr) {
-			//		f(ptr, w, h);
-			//	});
-			//}
-
-			//if (onNormalRecieved) {
-			//	_image_normal->transfer_finish_before_touch_buffer(_lane.queue);
-
-			//	_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(0, _accum_normal->memory());
-			//	_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(1, _image_normal->memory());
-			//	_eventQueue += _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera->resolution_x * _camera->resolution_y);
-
-			//	auto f = onNormalRecieved;
-			//	int w = _camera->resolution_x;
-			//	int h = _camera->resolution_y;
-			//	_image_normal->invoke_data_transfer(_lane.context, _data_transfer0->queue(), _eventQueue.last_event()->event_object(), &_copy_worker, [f, w, h](RGBA8ValueType *ptr) {
-			//		f(ptr, w, h);
-			//	});
-			//}
+				auto f = onNormalRecieved;
+				int w = _camera.resolution_x;
+				int h = _camera.resolution_y;
+				_inspect_normal->mark_end_touch_and_schedule_read(_lane.context, _eventQueue.last_event(), _data_transfer0->queue(), [f, w, h](RGBA8ValueType *ptr) {
+					f(ptr, w, h);
+				});
+			}
 		}
 		std::shared_ptr<OpenCLEvent> create_color_intermediate() {
 			return _kernel_accumlation_to_intermediate->launch(_lane.queue, 0, _accum_color_intermediate->size());
@@ -536,8 +559,9 @@ namespace rt {
 			int N = _accum_color_intermediate->size();
 
 			// read memory from other
-			create_intermediate_event_rhs->enqueue_wait(other->data_transfer0());
-			auto event_read = other->_accum_color_intermediate->enqueue_read(other->data_transfer0());
+			auto event_read = other->_accum_color_intermediate->enqueue_read(other->data_transfer1(), OpenCLEventList(create_intermediate_event_rhs->event_object()));
+			
+			// ** Wait read finish on CPU **
 			event_read->wait();
 
 			// prepare to send memory
@@ -548,25 +572,23 @@ namespace rt {
 			}
 
 			// write
-			auto write_event = _accum_color_intermediate_other->enqueue_write(_data_transfer0->queue());
+			auto write_event = _accum_color_intermediate_other->enqueue_write(_data_transfer1->queue());
 
 			// sync
-			write_event->enqueue_wait(_worker_queue->queue());
-
+			OpenCLEventList merge_wait_events;
+			merge_wait_events.add(write_event->event_object());
+			merge_wait_events.add(create_intermediate_event_lhs->event_object());
+			
 			// merge
-			create_intermediate_event_lhs->enqueue_wait(_worker_queue->queue());
-			return _kernel_merge_intermediate->launch(_worker_queue->queue(), 0, N);
+			return _kernel_merge_intermediate->launch(_worker_queue->queue(), 0, N, merge_wait_events);
 		}
 		ReadableBuffer<RGBA8ValueType> *finalize_color(std::shared_ptr<OpenCLEvent> create_intermediate_event) {
 			int N = _accum_color_intermediate->size();
-			create_intermediate_event->enqueue_wait(_worker_queue->queue());
-			auto tonemap_event = _kernel_tonemap->launch(_worker_queue->queue(), 0, N);
-			tonemap_event->enqueue_wait(_data_transfer0->queue());
-			auto read_event = _final_color->enqueue_read(_data_transfer0->queue());
+			auto tonemap_event = _kernel_tonemap->launch(_worker_queue->queue(), 0, N, OpenCLEventList(create_intermediate_event->event_object()));
+			auto read_event = _final_color->enqueue_read(_data_transfer1->queue(), OpenCLEventList(tonemap_event->event_object()));
 			read_event->wait();
 			return _final_color.get();
 		}
-
 		OpenCLLane lane() const {
 			return _lane;
 		}
@@ -574,7 +596,7 @@ namespace rt {
 			return _data_transfer0->queue();
 		}
 		cl_command_queue data_transfer1() const {
-			return _data_transfer0->queue();
+			return _data_transfer1->queue();
 		}
 
 		void re_start(int lane_index, const houdini_alembic::CameraObject &camera) {
@@ -593,8 +615,8 @@ namespace rt {
 		OpenCLLane _lane;
 		houdini_alembic::CameraObject _camera;
 
-		std::unique_ptr<OpenCLQueue> _data_transfer0;
-		std::unique_ptr<OpenCLQueue> _data_transfer1;
+		std::unique_ptr<OpenCLQueue> _data_transfer0; // Now used by step process
+		std::unique_ptr<OpenCLQueue> _data_transfer1; // Now used by merge and create image process
 		std::unique_ptr<OpenCLQueue> _worker_queue;
 
 		std::unique_ptr<SceneBuffer> _sceneBuffer;
@@ -615,7 +637,6 @@ namespace rt {
 
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
-		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_tonemap_simplest;
 
 		std::unique_ptr<OpenCLKernel> _kernel_accumlation_to_intermediate;
 		std::unique_ptr<OpenCLKernel> _kernel_merge_intermediate;
@@ -638,9 +659,8 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_normal;
 
-		//// Image Object
-		//std::unique_ptr<ReadableBuffer<RGBA8ValueType>> _image_color;
-		//std::unique_ptr<ReadableBuffer<RGBA8ValueType>> _image_normal;
+		// Inspect internal buffer
+		std::unique_ptr<PeriodicReadableBuffer<RGBA8ValueType>> _inspect_normal;
 
 		// final output
 		std::unique_ptr<ReadableBuffer<OpenCLHalf4>> _accum_color_intermediate;
@@ -649,12 +669,12 @@ namespace rt {
 		
 		EventQueue _eventQueue;
 
-		// public events, pointer, width, height
-		std::function<void(RGBA8ValueType *, int, int)> onColorRecieved;
+		// public events, onNormalRecieved( pointer, width, height )
 		std::function<void(RGBA8ValueType *, int, int)> onNormalRecieved;
 
 		// for data transfer synchronization
 		// WorkerThread _copy_worker;
+		tbb::task_group _worker;
 
 		// Restart 
 		struct RestartParameter {
@@ -766,6 +786,7 @@ namespace rt {
 					auto intermediate_complete_event_rhs = intermediate_complete_events[index_merge1];
 					
 					g.run([index_merge0, index_merge1, lane0, lane1, intermediate_complete_event_lhs, intermediate_complete_event_rhs, &intermediate_complete_events]() {
+						// Need to update intermediate_complete_events because intermediate will be updated.
 						intermediate_complete_events[index_merge0] = lane0->merge_from(lane1, intermediate_complete_event_lhs, intermediate_complete_event_rhs);
 					});
 				}
@@ -784,7 +805,6 @@ namespace rt {
 			int w = _camera->resolution_x;
 			int h = _camera->resolution_y;
 
-			// render_id check because maybe re_started...it is not perfect but works.
 			if (onColorRecieved) {
 				onColorRecieved(final_color->ptr(), w, h);
 			}
@@ -810,7 +830,9 @@ namespace rt {
 						max_step = std::max(max_step, _wavefront_lanes[i]->step_count());
 					}
 					if (2 < max_step) {
+						// Stopwatch sw;
 						create_color_image();
+						// printf("create_color_image %f \n", sw.elapsed());
 					}
 					else {
 						std::this_thread::sleep_for(std::chrono::milliseconds(100));

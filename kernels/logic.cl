@@ -70,8 +70,8 @@ __kernel void logic(
         if(material_id < 0) {
             color = (float3)(0.0f);
         } else {
-            // color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;
-            color = extension_results[gid].Ng;
+            color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;
+            // color = extension_results[gid].Ng;
         }
         uint pixel_index = wavefrontPath[gid].pixel_index;
         atomic_add_global(&normal32accum[pixel_index].r, color.x);

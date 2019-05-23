@@ -32,16 +32,4 @@ __kernel void RGB32Accumulation_to_RGBA8_linear(__global RGB32AccumulationValueT
     rgba8[gid].w = 255;
 }
 
-__kernel void RGB32Accumulation_to_RGBA8_tonemap_simplest(__global RGB32AccumulationValueType *rgb32, __global uchar4 *rgba8) {
-    uint gid = get_global_id(0);
-    float n = rgb32[gid].sampleCount;
-    float r = rgb32[gid].r / n;
-    float g = rgb32[gid].g / n;
-    float b = rgb32[gid].b / n;
-    rgba8[gid].x = (uchar)clamp((int)(pow(r, 1.0f / 2.2f) * 256.0f), 0, 255);
-    rgba8[gid].y = (uchar)clamp((int)(pow(g, 1.0f / 2.2f) * 256.0f), 0, 255);
-    rgba8[gid].z = (uchar)clamp((int)(pow(b, 1.0f / 2.2f) * 256.0f), 0, 255);
-    rgba8[gid].w = 255;
-}
-
 #endif

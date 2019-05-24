@@ -274,6 +274,7 @@ namespace rt {
 	};
 
 	struct StacklessBVH {
+		AABB top_aabb;
 		std::vector<uint32_t> primitive_ids;
 		std::vector<StacklessBVHNode> nodes;
 	};
@@ -287,13 +288,17 @@ namespace rt {
 			allocate_stacklessBVH(nodes, branch->R);
 		}
 	}
-	inline void build_stacklessBVH(std::vector<StacklessBVHNode> &nodes, std::vector<uint32_t> &primitive_ids, BVHNode *node) {
+	inline void build_stacklessBVH(std::vector<StacklessBVHNode> &nodes, std::vector<uint32_t> &primitive_ids, BVHNode *node, AABB *top_aabb) {
 		int me = node->index_for_array_storage;
 		if (node->parent) {
 			nodes[me].link_parent = node->parent->index_for_array_storage;
 		}
 
 		if (BVHBranch *branch = node->branch()) {
+			if (node->parent == nullptr) {
+				*top_aabb = AABB_union(branch->L_bounds, branch->R_bounds);
+			}
+
 			uint32_t L = branch->L->index_for_array_storage;
 			uint32_t R = branch->R->index_for_array_storage;
 			nodes[me].link_L = L;
@@ -304,8 +309,8 @@ namespace rt {
 			nodes[L].link_sibling = R;
 			nodes[R].link_sibling = L;
 
-			build_stacklessBVH(nodes, primitive_ids, branch->L);
-			build_stacklessBVH(nodes, primitive_ids, branch->R);
+			build_stacklessBVH(nodes, primitive_ids, branch->L, top_aabb);
+			build_stacklessBVH(nodes, primitive_ids, branch->R, top_aabb);
 		}
 		else {
 			// setup primitives
@@ -320,7 +325,7 @@ namespace rt {
 	inline StacklessBVH *create_stackless_bvh(EmbreeBVH *bvh) {
 		StacklessBVH *stacklessBVH = new StacklessBVH();
 		allocate_stacklessBVH(stacklessBVH->nodes, bvh->bvh_root);
-		build_stacklessBVH(stacklessBVH->nodes, stacklessBVH->primitive_ids, bvh->bvh_root);
+		build_stacklessBVH(stacklessBVH->nodes, stacklessBVH->primitive_ids, bvh->bvh_root, &stacklessBVH->top_aabb);
 		return stacklessBVH;
 	}
 

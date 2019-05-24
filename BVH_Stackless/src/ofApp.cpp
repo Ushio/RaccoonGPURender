@@ -117,7 +117,7 @@ namespace rt {
 			}
 
 			std::vector<RTCBuildPrimitive> primitives;
-			// primitives.reserve(_primitives.size());
+			primitives.reserve(_primitives.size());
 
 			for (int i = 0; i < _primitives.size(); ++i) {
 				glm::vec3 min_value(FLT_MAX);

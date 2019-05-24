@@ -4,19 +4,25 @@
 #include <glm/glm.hpp>
 #include "houdini_alembic.hpp"
 #include "gpu/raccoon_ocl.hpp"
+//#include "threaded_bvh.hpp"
+#include "stackless_bvh.hpp"
 
 namespace rt {
-	typedef struct {
-		AABB bounds;
-		int32_t primitive_indices_beg = 0;
-		int32_t primitive_indices_end = 0;
-	} MTBVHNodeWithoutLink;
+	//typedef struct {
+	//	AABB bounds;
+	//	int32_t primitive_indices_beg = 0;
+	//	int32_t primitive_indices_end = 0;
+	//} MTBVHNodeWithoutLink;
+
+	struct alignas(16) TrianglePrimitive {
+		uint32_t indices[3];
+	};
 
 	class SceneBuffer {
 	public:
-		std::unique_ptr<OpenCLBuffer<MTBVHNodeWithoutLink>> mtvbhCL;
-		std::unique_ptr<OpenCLBuffer<int32_t>> linksCL;
-		std::unique_ptr<OpenCLBuffer<uint32_t>> primitive_indicesCL;
+		AABB top_aabb;
+		std::unique_ptr<OpenCLBuffer<StacklessBVHNode>> stacklessBVHNodesCL;
+		std::unique_ptr<OpenCLBuffer<uint32_t>> primitive_idsCL;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> indicesCL;
 		std::unique_ptr<OpenCLBuffer<OpenCLFloat3>> pointsCL;
 	};
@@ -52,44 +58,58 @@ namespace rt {
 		}
 
 		void buildBVH() {
-			_embreeBVH = buildEmbreeBVH(_indices, _points);
-			buildMultiThreadedBVH(_mtbvh, _primitive_indices, _embreeBVH->bvh_root);
+			RT_ASSERT(_indices.size() % 3 == 0);
+			for (int i = 0; i < _indices.size(); i += 3) {
+				TrianglePrimitive primitive;
+				for (int j = 0; j < 3; ++j) {
+					primitive.indices[j] = _indices[i + j];
+				}
+				_primitives.emplace_back(primitive);
+			}
+
+			std::vector<RTCBuildPrimitive> primitives;
+			primitives.reserve(_primitives.size());
+
+			for (int i = 0; i < _primitives.size(); ++i) {
+				glm::vec3 min_value(FLT_MAX);
+				glm::vec3 max_value(-FLT_MAX);
+				for (int index : _primitives[i].indices) {
+					auto P = _points[index].as_vec3();
+
+					min_value = glm::min(min_value, P);
+					max_value = glm::max(max_value, P);
+				}
+				RTCBuildPrimitive prim = {};
+				prim.lower_x = min_value.x;
+				prim.lower_y = min_value.y;
+				prim.lower_z = min_value.z;
+				prim.geomID = 0;
+				prim.upper_x = max_value.x;
+				prim.upper_y = max_value.y;
+				prim.upper_z = max_value.z;
+				prim.primID = i;
+				primitives.emplace_back(prim);
+			}
+			_embreeBVH = std::shared_ptr<EmbreeBVH>(create_embreeBVH(primitives));
+			_stacklessBVH = std::shared_ptr<StacklessBVH>(create_stackless_bvh(_embreeBVH.get()));
 		}
 
 		std::unique_ptr<SceneBuffer> createBuffer(cl_context context) const {
 			std::unique_ptr<SceneBuffer> buffer(new SceneBuffer());
-
-			std::vector<MTBVHNodeWithoutLink> mtbvhCL(_mtbvh.size());
-			std::vector<int32_t> linksCL(_mtbvh.size() * 12);
-			int link_stride = _mtbvh.size() * 2;
-
-			for (int i = 0; i < _mtbvh.size(); ++i) {
-				mtbvhCL[i].bounds = _mtbvh[i].bounds;
-				mtbvhCL[i].primitive_indices_beg = _mtbvh[i].primitive_indices_beg;
-				mtbvhCL[i].primitive_indices_end = _mtbvh[i].primitive_indices_end;
-
-				for (int j = 0; j < 6; ++j) {
-					linksCL[j * link_stride + i * 2] = _mtbvh[i].hit_link[j];
-					linksCL[j * link_stride + i * 2 + 1] = _mtbvh[i].miss_link[j];
-				}
-			}
-
-			buffer->mtvbhCL = std::unique_ptr<OpenCLBuffer<MTBVHNodeWithoutLink>>(new OpenCLBuffer<MTBVHNodeWithoutLink>(context, mtbvhCL.data(), mtbvhCL.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->linksCL = std::unique_ptr<OpenCLBuffer<int32_t>>(new OpenCLBuffer<int32_t>(context, linksCL.data(), linksCL.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->primitive_indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _primitive_indices.data(), _primitive_indices.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->top_aabb = _stacklessBVH->top_aabb;
+			buffer->pointsCL = std::unique_ptr<OpenCLBuffer<OpenCLFloat3>>(new OpenCLBuffer<OpenCLFloat3>(context, _points.data(), _points.size(), OpenCLKernelBufferMode::ReadOnly));
 			buffer->indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _indices.data(), _indices.size(), OpenCLKernelBufferMode::ReadOnly));
-			std::vector<OpenCLFloat3> points(_points.size());
-			for (int i = 0; i < _points.size(); ++i) {
-				points[i] = _points[i];
-			}
-			buffer->pointsCL = std::unique_ptr<OpenCLBuffer<OpenCLFloat3>>(new OpenCLBuffer<OpenCLFloat3>(context, points.data(), points.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->stacklessBVHNodesCL = std::unique_ptr<OpenCLBuffer<StacklessBVHNode>>(new OpenCLBuffer<StacklessBVHNode>(context, _stacklessBVH->nodes.data(), _stacklessBVH->nodes.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->primitive_idsCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), OpenCLKernelBufferMode::ReadOnly));
 			return buffer;
 		}
 
 		std::vector<uint32_t> _indices;
-		std::vector<glm::vec3> _points;
+		std::vector<OpenCLFloat3> _points;
 		std::shared_ptr<EmbreeBVH> _embreeBVH;
-		std::vector<MTBVHNode> _mtbvh;
-		std::vector<uint32_t> _primitive_indices;
+		std::shared_ptr<StacklessBVH> _stacklessBVH;
+
+		// 現在は冗長
+		std::vector<TrianglePrimitive> _primitives;
 	};
 }

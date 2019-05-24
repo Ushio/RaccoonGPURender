@@ -7,7 +7,6 @@
 #include <tbb/task_group.h>
 
 #include "raccoon_ocl.hpp"
-#include "threaded_bvh.hpp"
 #include "peseudo_random.hpp"
 #include "houdini_alembic.hpp"
 #include "scene_manager.hpp"
@@ -387,7 +386,7 @@ namespace rt {
 			_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
 			_kernel_finalize_new_path = unique(new OpenCLKernel("finalize_new_path", program_new_path.program()));
 
-			OpenCLProgram program_extension_ray_cast("extension_ray_cast.cl", lane.context, lane.device_id);
+			OpenCLProgram program_extension_ray_cast("extension_ray_cast_stackless.cl", lane.context, lane.device_id);
 			_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", program_extension_ray_cast.program()));
 
 			OpenCLProgram program_logic("logic.cl", lane.context, lane.device_id);
@@ -523,10 +522,8 @@ namespace rt {
 				int arg = 0;
 				_kernel_extension_ray_cast->setArgument(arg++, _mem_path->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _mem_extension_results->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->mtvbhCL->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->mtvbhCL->size());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->linksCL->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_indicesCL->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->stacklessBVHNodesCL->memory());
+				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_idsCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
 				_eventQueue += _kernel_extension_ray_cast->launch(_lane.queue, 0, _wavefrontPathCount);
@@ -748,33 +745,32 @@ namespace rt {
 			_sceneManager.buildBVH();
 
 			// ALL Device
-			for (int i = 0; i < context->deviceCount(); ++i) {
+			//for (int i = 0; i < context->deviceCount(); ++i) {
+			//	auto lane = context->lane(i);
+			//	//if (lane.is_gpu == false) {
+			//	//	continue;
+			//	//}
+			//	//if (lane.is_discrete_memory == false) {
+			//	//	continue;
+			//	//}
+			//	int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
+			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
+			//	wavefront_lane->initialize(i);
+			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+			//}
+			for (int i = 0; i < 1; ++i) {
 				auto lane = context->lane(i);
-				//if (lane.is_gpu == false) {
-				//	continue;
-				//}
-				//if (lane.is_discrete_memory == false) {
-				//	continue;
-				//}
+				if (lane.is_gpu == false) {
+					continue;
+				}
+				if (lane.is_discrete_memory == false) {
+					continue;
+				}
 				int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
 				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
 				wavefront_lane->initialize(i);
 				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			}
-
-			//for (int i = 0; i < 1; ++i) {
-			//	auto lane = context->lane(i);
-			//	if (lane.is_gpu == false) {
-			//		continue;
-			//	}
-			//	if (lane.is_dGPU == false) {
-			//		continue;
-			//	}
-			//	int wavefront = lane.is_dGPU ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-			//	wavefront_lane->initialize(i);
-			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-			//}
 
 			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);

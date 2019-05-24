@@ -151,7 +151,7 @@ namespace rt {
 
 	inline bool intersect_ray_triangle(const glm::vec3 &orig, const glm::vec3 &dir, const glm::vec3 &v0, const glm::vec3 &v1, const glm::vec3 &v2, float *tmin)
 	{
-		const float kEpsilon = 1.0e-5;
+		const float kEpsilon = 1.0e-8f;
 
 		glm::vec3 v0v1 = v1 - v0;
 		glm::vec3 v0v2 = v2 - v0;

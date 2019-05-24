@@ -1,13 +1,20 @@
 ﻿#include "ofApp.h"
 
-#include "threaded_bvh.hpp"
+#include "raccoon_ocl.hpp"
+#include "stackless_bvh.hpp"
 #include "peseudo_random.hpp"
+
+using namespace rt;
 
 
 namespace rt {
 	struct Material {
 		glm::vec3 R;
 		glm::vec3 Le;
+	};
+
+	struct TrianglePrimitive {
+		uint32_t indices[3];
 	};
 
 	class BVHScene {
@@ -100,45 +107,83 @@ namespace rt {
 		}
 
 		void buildBVH() {
-			_embreeBVH = buildEmbreeBVH(_indices, _points);
-			buildThreadedBVH(_tbvh, _primitive_indices, _embreeBVH->bvh_root);
-			
-			// 無限ループの検知
-			for (int i = 0; i < _tbvh.size(); ++i) {
-				if (0 <= _tbvh[i].hit_link) {
-					// リンクは必ず後続のインデックスを持つ
-					RT_ASSERT(i < _tbvh[i].hit_link);
+			RT_ASSERT(_indices.size() % 3 == 0);
+			for (int i = 0; i < _indices.size(); i += 3) {
+				TrianglePrimitive primitive;
+				for (int j = 0; j < 3; ++j) {
+					primitive.indices[j] = _indices[i + j];
 				}
-
-				if (0 <= _tbvh[i].miss_link ) {
-					// リンクは必ず後続のインデックスを持つ
-					RT_ASSERT(i < _tbvh[i].miss_link);
-				}
+				_primitives.emplace_back(primitive);
 			}
 
-			buildMultiThreadedBVH(_mtbvh, _primitive_indices, _embreeBVH->bvh_root);
-			// もはやリンクがかならず後続のインデックスを持つとは限らない。
+			std::vector<RTCBuildPrimitive> primitives;
+			// primitives.reserve(_primitives.size());
+
+			for (int i = 0; i < _primitives.size(); ++i) {
+				glm::vec3 min_value(FLT_MAX);
+				glm::vec3 max_value(-FLT_MAX);
+				for (int index : _primitives[i].indices) {
+					auto P = _points[index];
+
+					min_value = glm::min(min_value, P);
+					max_value = glm::max(max_value, P);
+				}
+				RTCBuildPrimitive prim = {};
+				prim.lower_x = min_value.x;
+				prim.lower_y = min_value.y;
+				prim.lower_z = min_value.z;
+				prim.geomID = 0;
+				prim.upper_x = max_value.x;
+				prim.upper_y = max_value.y;
+				prim.upper_z = max_value.z;
+				prim.primID = i;
+				primitives.emplace_back(prim);
+			}
+			_embreeBVH = std::shared_ptr<EmbreeBVH>(create_embreeBVH(primitives));
+			_stacklessBVH = std::shared_ptr<StacklessBVH>(create_stackless_bvh(_embreeBVH.get()));
 		}
+		//void buildBVH() {
+		//	_embreeBVH = buildEmbreeBVH(_indices, _points);
+		//	buildThreadedBVH(_tbvh, _primitive_indices, _embreeBVH->bvh_root);
+		//	
+		//	// 無限ループの検知
+		//	for (int i = 0; i < _tbvh.size(); ++i) {
+		//		if (0 <= _tbvh[i].hit_link) {
+		//			// リンクは必ず後続のインデックスを持つ
+		//			RT_ASSERT(i < _tbvh[i].hit_link);
+		//		}
+
+		//		if (0 <= _tbvh[i].miss_link ) {
+		//			// リンクは必ず後続のインデックスを持つ
+		//			RT_ASSERT(i < _tbvh[i].miss_link);
+		//		}
+		//	}
+
+		//	buildMultiThreadedBVH(_mtbvh, _primitive_indices, _embreeBVH->bvh_root);
+		//	// もはやリンクがかならず後続のインデックスを持つとは限らない。
+		//}
 
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
 		houdini_alembic::CameraObject *_camera = nullptr;
 
 		std::vector<uint32_t> _indices;
+		std::vector<TrianglePrimitive> _primitives;
 		std::vector<glm::vec3> _points;
-		std::vector<Material> _materials;
 		std::shared_ptr<EmbreeBVH> _embreeBVH;
 
-		std::vector<TBVHNode> _tbvh;
-		std::vector<MTBVHNode> _mtbvh;
+		//std::vector<TBVHNode> _tbvh;
+		//std::vector<MTBVHNode> _mtbvh;
 		std::vector<uint32_t> _primitive_indices;
+
+		std::shared_ptr<StacklessBVH> _stacklessBVH;
 
 		std::vector<RayCast> _rayCasts;
 	};
 }
 
 void draw_bounds(const rt::AABB &aabb) {
-	auto size = aabb.upper - aabb.lower;
-	auto center = (aabb.upper + aabb.lower) * 0.5f;
+	auto size = aabb.upper.as_vec3() - aabb.lower.as_vec3();
+	auto center = (aabb.upper.as_vec3() + aabb.lower.as_vec3()) * 0.5f;
 	ofNoFill();
 	ofDrawBox(center, size.x, size.y, size.z);
 	ofFill();
@@ -283,6 +328,7 @@ void ofApp::draw() {
 	//	}
 	//}
 
+
 	if (_alembicscene && show_scene_preview) {
 		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
 	}
@@ -295,35 +341,41 @@ void ofApp::draw() {
 		ofSetColor(ofColor::gray);
 		ofDrawSphere(ro, 0.02f);
 
+		PrimitiveIntersection f = [&](uint32_t primitive_id, float *tmin) {
+			glm::vec3 v0 = _BVHScene->_points[_BVHScene->_primitives[primitive_id].indices[0]];
+			glm::vec3 v1 = _BVHScene->_points[_BVHScene->_primitives[primitive_id].indices[1]];
+			glm::vec3 v2 = _BVHScene->_points[_BVHScene->_primitives[primitive_id].indices[2]];
+			return intersect_ray_triangle(ro, rd, v0, v1, v2, tmin);
+		};
+
 		// Standard BVH
-		std::vector<int32_t> visited_bvh;
-		{
-			float tmin = FLT_MAX;
-			if (intersect_bvh(_BVHScene->_embreeBVH->bvh_root, ro, rd, _BVHScene->_indices, _BVHScene->_points, &tmin, visited_bvh)) {
-				ofSetColor(ofColor::red);
+		//{
+		//	float tmin = FLT_MAX;
+		//	if (intersect_bvh(_BVHScene->_embreeBVH->bvh_root, ro, rd, &tmin, f)) {
+		//		ofSetColor(ofColor::red);
 
-				ofDrawLine(ro, ro + rd * tmin);
-				ofDrawSphere(ro + rd * tmin, 0.005f);
+		//		ofDrawLine(ro, ro + rd * tmin);
+		//		ofDrawSphere(ro + rd * tmin, 0.005f);
 
-				RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
-			}
-			else {
-				ofSetColor(ofColor::gray);
-				ofDrawLine(ro, ro + rd * 1.0f);
+		//		RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+		//	}
+		//	else {
+		//		ofSetColor(ofColor::gray);
+		//		ofDrawLine(ro, ro + rd * 1.0f);
 
-				RT_ASSERT(rayCast.tmin == 0.0f);
-			}
-		}
+		//		RT_ASSERT(rayCast.tmin == 0.0f);
+		//	}
+		//}
 
-		ofSetColor(ofColor::gray);
-		draw_bounds(_BVHScene->_tbvh[0].bounds);
+		//ofSetColor(ofColor::gray);
+		//draw_bounds(_BVHScene->_tbvh[0].bounds);
 
 		// Threaded BVH
 		uint32_t primitive_index;
 		std::vector<int32_t> visited_tbvh;
 		{
 			float tmin = FLT_MAX;
-			if (intersect_tbvh(_BVHScene->_tbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_tbvh)) {
+			if (intersect_bvh(_BVHScene->_stacklessBVH.get(), ro, rd, &tmin, f)) {
 				ofSetColor(ofColor::red);
 
 				ofDrawLine(ro, ro + rd * tmin);
@@ -338,30 +390,51 @@ void ofApp::draw() {
 				RT_ASSERT(rayCast.tmin == 0.0f);
 			}
 		}
+
+		// Threaded BVH
+		//uint32_t primitive_index;
+		//std::vector<int32_t> visited_tbvh;
+		//{
+		//	float tmin = FLT_MAX;
+		//	if (intersect_tbvh(_BVHScene->_tbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_tbvh)) {
+		//		ofSetColor(ofColor::red);
+
+		//		ofDrawLine(ro, ro + rd * tmin);
+		//		ofDrawSphere(ro + rd * tmin, 0.005f);
+
+		//		RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+		//	}
+		//	else {
+		//		ofSetColor(ofColor::gray);
+		//		ofDrawLine(ro, ro + rd * 1.0f);
+
+		//		RT_ASSERT(rayCast.tmin == 0.0f);
+		//	}
+		//}
 
 
 		// Visited Node is must be equals!
 		// RT_ASSERT(visited_bvh == visited_tbvh);
 
 		// MultiThreaded BVH
-		{
-			float tmin = FLT_MAX;
-			std::vector<int32_t> visited_mtbvh;
-			if (intersect_mtbvh(_BVHScene->_mtbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_mtbvh)) {
-				ofSetColor(ofColor::red);
+		//{
+		//	float tmin = FLT_MAX;
+		//	std::vector<int32_t> visited_mtbvh;
+		//	if (intersect_mtbvh(_BVHScene->_mtbvh, _BVHScene->_primitive_indices, _BVHScene->_indices, _BVHScene->_points, ro, rd, &tmin, &primitive_index, visited_mtbvh)) {
+		//		ofSetColor(ofColor::red);
 
-				ofDrawLine(ro, ro + rd * tmin);
-				ofDrawSphere(ro + rd * tmin, 0.005f);
+		//		ofDrawLine(ro, ro + rd * tmin);
+		//		ofDrawSphere(ro + rd * tmin, 0.005f);
 
-				RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
-			}
-			else {
-				ofSetColor(ofColor::gray);
-				ofDrawLine(ro, ro + rd * 1.0f);
+		//		RT_ASSERT(fabs(rayCast.tmin - tmin) < 1.0e-4f);
+		//	}
+		//	else {
+		//		ofSetColor(ofColor::gray);
+		//		ofDrawLine(ro, ro + rd * 1.0f);
 
-				RT_ASSERT(rayCast.tmin == 0.0f);
-			}
-		}
+		//		RT_ASSERT(rayCast.tmin == 0.0f);
+		//	}
+		//}
 	}
 
 	//draw_bvh(_gpubvh->_bvh);

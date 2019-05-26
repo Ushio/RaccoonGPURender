@@ -45,21 +45,11 @@ namespace rt {
 		}
 		void index_to_phi_range(int xi, Real *lower_phi, Real *upper_phi) const {
 			*upper_phi = glm::two_pi<Real>() - xi * _phi_step;
-			*lower_phi = *upper_phi - _phi_step;
-		}
-		Real index_to_phi_mid(int xi) const {
-			Real upper_phi, lower_phi;
-			index_to_phi_range(xi, &upper_phi, &lower_phi);
-			return (upper_phi + lower_phi) * Real(0.5);
+			*lower_phi = glm::two_pi<Real>() - (xi + 1) * _phi_step;
 		}
 		void index_to_theta_range(int yi, Real *lower_theta, Real *upper_theta) const {
 			*lower_theta = _theta_step * yi;
-			*upper_theta = *lower_theta + _theta_step;
-		}
-		Real index_to_theta_mid(int yi) const {
-			Real lower_theta, upper_theta;
-			index_to_theta_range(yi, &lower_theta, &upper_theta);
-			return (lower_theta + upper_theta) * Real(0.5);
+			*upper_theta = _theta_step * (yi + 1);
 		}
 		int theta_to_y(Real theta) const {
 			return (int)std::floor(_theta_to_y.evaluate(theta));
@@ -123,28 +113,104 @@ namespace rt {
 		return true;
 	}
 
+
+	/*
+	-5 => 1
+	-4 => 2
+	-3 => 0
+	-2 => 1
+	-1 => 2
+	0 => 0
+	1 => 1
+	2 => 2
+	3 => 0
+	4 => 1
+	int main() {
+		for(int i = -5 ; i < 5 ; ++i) {
+			printf("%d => %d\n", i, fract_int(i, 3));
+		}
+		return 0;
+	}
+	*/
+	inline int fract_int(int x, int m) {
+		int r = x % m;
+		return r < 0 ? r + m : r;
+	}
+
+	class IDirectionWeight {
+	public:
+		virtual ~IDirectionWeight() {}
+		virtual double weight(const glm::dvec3 &direction) const = 0;
+	};
+	class UniformDirectionWeight : public IDirectionWeight {
+	public:
+		double weight(const glm::dvec3 &direction) const override {
+			return 1.0;
+		}
+	};
+
 	class ImageEnvmap : public EnvironmentMap {
 	public:
-		ImageEnvmap(std::shared_ptr<Image2D> texture, std::function<float(glm::vec3)> weight_for_direction = [](glm::vec3) { return 1.0f; }) {
+		struct EnvmapFragment {
+			double beg_y = 0.0;
+			double end_y = 0.0;
+			double beg_phi = 0.0;
+			double end_phi = 0.0;
+		};
+
+		ImageEnvmap(std::shared_ptr<Image2D> texture, const IDirectionWeight &direction_weight) {
 			_texture = texture;
 
 			EnvmapCoordinateSystem<double> envCoord(_texture->width(), _texture->height());
 
-			// Selection Weight
 			const Image2D &image = *_texture;
-			std::vector<double> weights(image.width() * image.height());
+
+			// Setup Fragments
+			_fragments.resize(image.width() * image.height());
+
 			for (int y = 0; y < image.height(); ++y) {
 				double beg_theta, end_theta;
 				envCoord.index_to_theta_range(y, &beg_theta, &end_theta);
-				double sr = solid_angle_sliced_sphere(beg_theta, end_theta) / _texture->width();
-				double theta = (beg_theta + end_theta) * 0.5;
+				double beg_y = std::cos(end_theta);
+				double end_y = std::cos(beg_theta);
 				for (int x = 0; x < image.width(); ++x) {
-					double phi = envCoord.index_to_phi_mid(x);
+					double beg_phi;
+					double end_phi;
+					envCoord.index_to_phi_range(x, &beg_phi, &end_phi);
+					EnvmapFragment fragment;
+					fragment.beg_y = beg_y;
+					fragment.end_y = end_y;
+					fragment.beg_phi = beg_phi;
+					fragment.end_phi = end_phi;
+					_fragments[y * image.width() + x] = fragment;
+				}
+			}
 
-					glm::vec3 direction = polar_to_cartesian(theta, phi);
+			// Compute SolidAngle
+			std::vector<double> fragment_solid_angles(image.height());
+			for (int y = 0; y < image.height(); ++y) {
+				double beg_theta, end_theta;
+				envCoord.index_to_theta_range(y, &beg_theta, &end_theta);
+				fragment_solid_angles[y] = solid_angle_sliced_sphere(beg_theta, end_theta) / _texture->width();
+			}
+
+			// Selection Weight
+			std::vector<double> weights(image.width() * image.height());
+			for (int y = 0; y < image.height(); ++y) {
+				auto a_fragment = _fragments[y * image.width()];
+				auto sr = fragment_solid_angles[y];
+
+				auto theta = (std::acos(a_fragment.beg_y) + std::acos(a_fragment.end_y)) * 0.5;
+				for (int x = 0; x < image.width(); ++x) {
+					int index = y * image.width() + x;
+					auto fragment = _fragments[index];
+					auto phi = (fragment.beg_phi + fragment.end_phi) * 0.5;
+
+					glm::dvec3 direction = polar_to_cartesian(theta, phi);
 					glm::vec4 radiance = image(x, y);
 					float Y = 0.2126f * radiance.x + 0.7152f * radiance.y + 0.0722f * radiance.z;
-					weights[y * image.width() + x] = Y * sr * weight_for_direction(direction);
+					double weight = Y * sr * direction_weight.weight(direction);
+					weights[index] = weight;
 				}
 			}
 			_aliasMethod.prepare(weights);
@@ -158,6 +224,16 @@ namespace rt {
 				
 				for (int ix = 0; ix < image.width(); ++ix) {
 					int index = iy * image.width() + ix;
+					double p = _aliasMethod.probability(index);
+					_pdf[index] = p * (1.0 / sr);
+				}
+			}
+
+			_pdf.resize(image.width() * image.height());
+			for (int y = 0; y < image.height(); ++y) {
+				auto sr = fragment_solid_angles[y];
+				for (int x = 0; x < image.width(); ++x) {
+					int index = y * image.width() + x;
 					double p = _aliasMethod.probability(index);
 					_pdf[index] = p * (1.0 / sr);
 				}
@@ -191,61 +267,59 @@ namespace rt {
 
 			int ix = _envCoordF->phi_to_x(phi);
 			int iy = _envCoordF->theta_to_y(theta);
-
 			return _pdf[iy * _texture->width() + ix];
 		}
 		virtual glm::vec3 sample(PeseudoRandom *random, const glm::vec3 &n, float *pdf) const override {
-			const Image2D &image = *_texture;
-
 			int index = _aliasMethod.sample(random->uniform_integer(), random->uniform());
-			int ix = index % image.width();
-			int iy = index / image.width();
-
-			float beg_theta, end_theta;
-			_envCoordF->index_to_theta_range(iy, &beg_theta, &end_theta);
-			float beg_phi, end_phi;
-			_envCoordF->index_to_phi_range(ix, &beg_phi, &end_phi);
-
-			float beg_y = cos(beg_theta);
-			float end_y = cos(end_theta);
-			float y = glm::mix(beg_y, end_y, random->uniform());
-			float phi = glm::mix(beg_phi, end_phi, random->uniform());
-
+			auto fragment = _fragments[index];
+			float y   = glm::mix(fragment.beg_y, fragment.end_y, random->uniform());
+			float phi = glm::mix(fragment.beg_phi, fragment.end_phi, random->uniform());
 			glm::vec3 point_on_cylinder = {
 				std::sin(phi),
 				y,
 				std::cos(phi)
 			};
-
 			*pdf = _pdf[index];
-
 			return project_cylinder_to_sphere(point_on_cylinder);
 		}
-	private:
 		std::unique_ptr<EnvmapCoordinateSystem<float>> _envCoordF;
 		std::shared_ptr<Image2D> _texture;
-		std::vector<float> _pdf;
+		std::vector<double> _pdf;
+		std::vector<EnvmapFragment> _fragments;
 		AliasMethod<double> _aliasMethod;
 	};
 
+	class SixAxisDirectionWeight : public IDirectionWeight {
+	public:
+		SixAxisDirectionWeight(CubeSection cube_selection) : _cube_selection(cube_selection) {}
+		double weight(const glm::dvec3 &direction) const override {
+			switch(_cube_selection) {
+			case CubeSection_XPlus:
+				return std::max(direction.x, 0.0);
+			case CubeSection_XMinus:
+				return std::max(-direction.x, 0.0);
+			case CubeSection_YPlus:
+				return std::max(direction.y, 0.0);
+			case CubeSection_YMinus:
+				return std::max(-direction.y, 0.0);
+			case CubeSection_ZPlus:
+				return std::max(direction.z, 0.0);
+			case CubeSection_ZMinus:
+				return std::max(-direction.z, 0.0);
+			}
+			return 1.0;
+		}
+		CubeSection _cube_selection;
+	};
 	class SixAxisImageEnvmap : public EnvironmentMap {
 	public:
 		SixAxisImageEnvmap(std::shared_ptr<Image2D> texture) {
-			auto weight_for_direction = [](glm::vec3 direction, glm::vec3 cube_dir) {
-				//float cx[4] = { 0.0f, 0.256f, 0.394f, 0.730918f };
-				//float cy[4] = { 1.0f, 1.0f,   0.056f, 0.0f };
-
-				//float theta = glm::acos(glm::dot(direction, cube_dir));
-				//float w = evaluate_bezier_funtion(theta / glm::pi<float>(), cx, cy, 5);
-				//return w;
-				return std::max(glm::dot(direction, cube_dir), 0.0f);
-			};
-			_cubeEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, [=](glm::vec3 rd) { return weight_for_direction(rd, glm::vec3(+1, 0, 0)); }));
-			_cubeEnvmap[1] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, [=](glm::vec3 rd) { return weight_for_direction(rd, glm::vec3(-1, 0, 0)); }));
-			_cubeEnvmap[2] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, [=](glm::vec3 rd) { return weight_for_direction(rd, glm::vec3(0, +1, 0)); }));
-			_cubeEnvmap[3] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, [=](glm::vec3 rd) { return weight_for_direction(rd, glm::vec3(0, -1, 0)); }));
-			_cubeEnvmap[4] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, [=](glm::vec3 rd) { return weight_for_direction(rd, glm::vec3(0, 0, +1)); }));
-			_cubeEnvmap[5] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, [=](glm::vec3 rd) { return weight_for_direction(rd, glm::vec3(0, 0, -1)); }));
+			_cubeEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, SixAxisDirectionWeight(CubeSection_XPlus)));
+			_cubeEnvmap[1] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, SixAxisDirectionWeight(CubeSection_XMinus)));
+			_cubeEnvmap[2] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, SixAxisDirectionWeight(CubeSection_YPlus)));
+			_cubeEnvmap[3] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, SixAxisDirectionWeight(CubeSection_YMinus)));
+			_cubeEnvmap[4] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, SixAxisDirectionWeight(CubeSection_ZPlus)));
+			_cubeEnvmap[5] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, SixAxisDirectionWeight(CubeSection_ZMinus)));
 		}
 		virtual glm::vec3 radiance(const glm::vec3 &rd) const override {
 			return _cubeEnvmap[0]->radiance(rd);

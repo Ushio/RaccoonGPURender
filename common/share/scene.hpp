@@ -234,7 +234,10 @@ namespace rt {
 						auto texture = std::shared_ptr<Image2D>(new Image2D());
 						texture->load(absFilePath.string().c_str());
 						texture->clamp_rgb(0.0f, 10000.0f);
-						_environmentMap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture));
+
+
+						UniformDirectionWeight uniform_weight;
+						_environmentMap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, uniform_weight));
 						// _environmentMap = std::shared_ptr<SixAxisImageEnvmap>(new SixAxisImageEnvmap(texture));
 					}
 				}

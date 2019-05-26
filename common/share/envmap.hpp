@@ -1,15 +1,14 @@
 ﻿#pragma once
 #include <functional>
 #include <glm/glm.hpp>
-#include "material.hpp"
 #include "alias_method.hpp"
 #include "assertion.hpp"
 #include "cube_section.hpp"
 #include "cubic_bezier.hpp"
 #include "linear_transform.hpp"
+#include "lambertian_sampler.hpp"
 
 namespace rt {
-
 	class EnvironmentMap {
 	public:
 		virtual ~EnvironmentMap() {}

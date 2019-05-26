@@ -27,10 +27,8 @@ namespace rt {
 
 			_values.resize(_width * _height);
 			for (int i = 0, n = _width * _height; i < n; ++i) {
-				_values[i].x = pixels[i * 4];
-				_values[i].y = pixels[i * 4 + 1];
-				_values[i].z = pixels[i * 4 + 2];
-				_values[i].w = pixels[i * 4 + 3];
+				int index = i * 4;
+				_values[i] = glm::vec4(pixels[index], pixels[index + 1], pixels[index + 2], pixels[index + 3]);
 			}
 			return true;
 		}

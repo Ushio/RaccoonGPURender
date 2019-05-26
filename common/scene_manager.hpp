@@ -6,6 +6,8 @@
 #include "raccoon_ocl.hpp"
 #include "stackless_bvh.hpp"
 #include "material_type.hpp"
+#include "image2d.hpp"
+#include "envmap.hpp"
 
 namespace rt {
 	struct MaterialStorage {
@@ -118,11 +120,20 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
 	};
 
+	class EnvmapBuffer {
+	public:
+		std::unique_ptr<OpenCLImage> envmap;
+	};
+
 	class SceneManager {
 	public:
 		SceneManager():_material_storage(new MaterialStorage()){
 
 		}
+		void setAlembicDirectory(std::filesystem::path alembicDirectory) {
+			_alembicDirectory = alembicDirectory;
+		}
+
 		void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
 			bool isTriangleMesh = std::all_of(p->faceCounts.begin(), p->faceCounts.end(), [](int32_t f) { return f == 3; });
 			if (isTriangleMesh == false) {
@@ -151,6 +162,39 @@ namespace rt {
 			RT_ASSERT(std::all_of(_indices.begin(), _indices.end(), [&](uint32_t index) { return index < _points.size(); }));
 
 			add_materials(_material_storage.get(), p, xformInverseTransposed);
+		}
+		void addPoint(houdini_alembic::PointObject *p) {
+			auto point_type = p->points.column_as_string("point_type");
+			if (point_type == nullptr) {
+				return;
+			}
+			for (int i = 0; i < point_type->rowCount(); ++i) {
+				if (point_type->get(i) == "ImageEnvmap") {
+					if (auto r = p->points.column_as_string("file")) {
+						_envmapImage = load_image(r->get(i));
+						UniformDirectionWeight uniform_weight;
+						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
+					}
+				}
+			}
+		}
+		std::shared_ptr<Image2D> load_image(std::string filename) const {
+			std::filesystem::path filePath(filename);
+			filePath.make_preferred();
+
+			auto absFilePath = _alembicDirectory / filePath;
+
+			auto image = std::shared_ptr<Image2D>(new Image2D());
+			image->load(absFilePath.string().c_str());
+
+			// Debug
+			//image->resize(2, 2);
+			//(*image)(0, 0) = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+			//(*image)(1, 0) = glm::vec4(0.0f, 1.0f, 1.0f, 1.0f);
+			//(*image)(0, 1) = glm::vec4(1.0f, 0.0f, 1.0f, 1.0f);
+			//(*image)(1, 1) = glm::vec4(1.0f, 1.0f, 0.0f, 1.0f);
+
+			return image;
 		}
 
 		void buildBVH() {
@@ -206,6 +250,14 @@ namespace rt {
 			return buffer;
 		}
 
+		std::unique_ptr<EnvmapBuffer> createEnvmapBuffer(cl_context context) const {
+			std::unique_ptr<EnvmapBuffer> buffer(new EnvmapBuffer());
+			buffer->envmap = std::unique_ptr<OpenCLImage>(new OpenCLImage(context, _envmapImage->data(), _envmapImage->width(), _envmapImage->height()));
+			return buffer;
+		}
+
+		std::filesystem::path _alembicDirectory;
+
 		std::vector<uint32_t> _indices;
 		std::vector<OpenCLFloat3> _points;
 		std::shared_ptr<EmbreeBVH> _embreeBVH;
@@ -216,5 +268,8 @@ namespace rt {
 
 		// Material
 		std::unique_ptr<MaterialStorage> _material_storage;
+
+		std::shared_ptr<Image2D> _envmapImage;
+		std::shared_ptr<ImageEnvmap> _imageEnvmap;
 	};
 }

@@ -18,7 +18,7 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
-			// ofSaveImage(_imagedata, "render.png");
+			ofSaveImage(_imagedata, "render.png");
 		}
 		_dirty = true;
 	}
@@ -61,9 +61,10 @@ void ofApp::setup() {
 	context_ptr = new OpenCLContext();
 	RT_ASSERT(0 < context_ptr->deviceCount());
 
+	std::string abcPath = ofToDataPath("../../../scenes/wavefront_scene.abc", true);
 	houdini_alembic::AlembicStorage storage;
 	std::string error_message;
-	storage.open(ofToDataPath("../../../scenes/wavefront_scene.abc"), error_message);
+	storage.open(abcPath, error_message);
 
 	if (storage.isOpened()) {
 		std::string error_message;
@@ -72,7 +73,10 @@ void ofApp::setup() {
 	if (error_message.empty() == false) {
 		printf("sample error_message: %s\n", error_message.c_str());
 	}
-	pt = new WavefrontPathTracing(context_ptr, _alembicscene);
+
+	std::filesystem::path abcDirectory(abcPath);
+	abcDirectory.remove_filename();
+	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory);
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};

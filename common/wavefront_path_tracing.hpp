@@ -420,6 +420,7 @@ namespace rt {
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
+			_envmapBuffer = sceneManager.createEnvmapBuffer(lane.context);
 
 			// accumlation
 			_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
@@ -540,6 +541,7 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _mem_random_state->memory());
 				_kernel_logic->setArgument(arg++, _mem_extension_results->memory());
 				_kernel_logic->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_logic->setArgument(arg++, _envmapBuffer->envmap->memory());
 				_kernel_logic->setArgument(arg++, _accum_color->memory());
 				_kernel_logic->setArgument(arg++, _accum_normal->memory());
 				_kernel_logic->setArgument(arg++, _queue_new_path_item->memory());
@@ -650,6 +652,7 @@ namespace rt {
 
 		std::unique_ptr<SceneBuffer> _sceneBuffer;
 		std::unique_ptr<MaterialBuffer> _materialBuffer;
+		std::unique_ptr<EnvmapBuffer> _envmapBuffer;
 
 		// kernels
 		std::unique_ptr<OpenCLKernel> _kernel_random_initialize;
@@ -728,9 +731,11 @@ namespace rt {
 
 	class WavefrontPathTracing {
 	public:
-		WavefrontPathTracing(OpenCLContext *context, std::shared_ptr<houdini_alembic::AlembicScene> scene) 
+		WavefrontPathTracing(OpenCLContext *context, std::shared_ptr<houdini_alembic::AlembicScene> scene, std::filesystem::path alembicDirectory)
 			:_context(context)
 			,_scene(scene) {
+
+			_sceneManager.setAlembicDirectory(alembicDirectory);
 
 			for (auto o : scene->objects) {
 				if (o->visible == false) {
@@ -744,6 +749,9 @@ namespace rt {
 				}
 				if (auto polymesh = o.as_polygonMesh()) {
 					_sceneManager.addPolymesh(polymesh);
+				}
+				if (auto point = o.as_point()) {
+					_sceneManager.addPoint(point);
 				}
 			}
 			RT_ASSERT(_camera);

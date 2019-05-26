@@ -419,6 +419,31 @@ namespace rt {
 		uint32_t _length = 0;
 	};
 
+	class OpenCLImage {
+	public:
+		OpenCLImage(cl_context context, glm::vec4 *p, int width, int height):_width(width), _height(height) {
+			cl_image_format format = {};
+			format.image_channel_data_type = CL_FLOAT;
+			format.image_channel_order = CL_RGBA;
+			cl_image_desc desc = {};
+			desc.image_type = CL_MEM_OBJECT_IMAGE2D;
+			desc.image_width = width;
+			desc.image_height = height;
+
+			cl_int status;
+			cl_mem memory = clCreateImage(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, &format, &desc, p, &status);
+			RT_ASSERT(status == CL_SUCCESS);
+			_memory = decltype(_memory)(memory, clReleaseMemObject);
+		}
+		cl_mem memory() const {
+			return _memory.get();
+		}
+	private:
+		int _width;
+		int _height;
+		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
+	};
+
 	class OpenCLLane {
 	public:
 		std::string device_name;

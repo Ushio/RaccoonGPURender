@@ -454,6 +454,9 @@
     <ClCompile Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.cpp">
       <Filter>src\ofxRaccoonImGui</Filter>
     </ClCompile>
+    <ClCompile Include="..\libs\stb\stb.cpp">
+      <Filter>src\stb</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">
@@ -494,6 +497,9 @@
     </Filter>
     <Filter Include="src\ofxRaccoonImGui">
       <UniqueIdentifier>{1c33151f-913a-45cd-9661-2f09b394070b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\stb">
+      <UniqueIdentifier>{bd75bd46-f82d-4050-a65d-045c57fd98ea}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -1240,6 +1246,12 @@
     </ClInclude>
     <ClInclude Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.hpp">
       <Filter>src\ofxRaccoonImGui</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\stb\stb_image.h">
+      <Filter>src\stb</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\stb\stb_image_write.h">
+      <Filter>src\stb</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

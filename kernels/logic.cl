@@ -4,6 +4,31 @@
 #include "types.cl"
 #include "atomic.cl"
 
+void cartesian_to_polar(float3 rd, float *theta, float *phi) {
+    float z = rd.y;
+    float x = rd.z;
+    float y = rd.x;
+    *theta = atan2(sqrt(x * x + y * y) , z);
+    *phi = atan2(y, x);
+    if (isfinite(*phi) == false) {
+        *phi = 0.0f;
+    }
+}
+
+float3 sample_envmap(__read_only image2d_t envmap, float3 rd) {
+    float theta, phi;
+    cartesian_to_polar(rd, &theta, &phi);
+    
+    // 1.0f - is clockwise order envmap
+    const float pi = M_PI;
+    float u = 1.0f - phi / (2.0f * pi);
+    float v = theta / pi;
+
+    // CLK_FILTER_LINEAR, CLK_ADDRESS_REPEAT
+    const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
+    return read_imagef(envmap, s, (float2)(u, v)).xyz;
+}
+
 // TODO: russian roulette
 
 /*
@@ -27,6 +52,7 @@ __kernel void logic(
     __global uint4 *random_states,
     __global ExtensionResult *extension_results,
     __global ShadingResult *shading_results,
+    __read_only image2d_t envmap,
     __global RGB32AccumulationValueType *rgb32accum,
     __global RGB32AccumulationValueType *normal32accum,
     __global uint *new_path_queue_item,
@@ -60,7 +86,12 @@ __kernel void logic(
 
     if(evalEnv) {
         // contribution env light
-        float3 emission = (float3)(1.0f);
+        // float3 emission = (float3)(1.0f);
+        // wavefrontPath[gid].L += wavefrontPath[gid].T * emission;
+
+        // if miss intersect then rd is old dir, otherwise new direction sampled by material stage
+        float3 rd = wavefrontPath[gid].rd;
+        float3 emission = sample_envmap(envmap, rd);
         wavefrontPath[gid].L += wavefrontPath[gid].T * emission;
     }
 

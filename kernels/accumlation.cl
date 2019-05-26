@@ -44,14 +44,32 @@ __kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __globa
     vstore_half(sab, 0, &a[i].sampleCount);
 }
 
+// float reinhard(float x, float L2) {
+//     return x / (1.0f + x) * (1.0f + x / L2);
+// }
+// __kernel void tonemap(__global RGB16AccumulationValueType *rgb16, __global uchar4 *rgba8) {
+//     size_t i = get_global_id(0);
+//     float r = vload_half(0, &rgb16[i].r_divided);
+//     float g = vload_half(0, &rgb16[i].g_divided);
+//     float b = vload_half(0, &rgb16[i].b_divided);
+
+//     const float L = 1.5f;
+//     const float L2 = L * L;
+//     rgba8[i].x = (uchar)clamp((int)(reinhard(r, L2) * 256.0f), 0, 255);
+//     rgba8[i].y = (uchar)clamp((int)(reinhard(g, L2) * 256.0f), 0, 255);
+//     rgba8[i].z = (uchar)clamp((int)(reinhard(b, L2) * 256.0f), 0, 255);
+//     rgba8[i].w = 255;
+// }
+
 __kernel void tonemap(__global RGB16AccumulationValueType *rgb16, __global uchar4 *rgba8) {
     size_t i = get_global_id(0);
     float r = vload_half(0, &rgb16[i].r_divided);
     float g = vload_half(0, &rgb16[i].g_divided);
     float b = vload_half(0, &rgb16[i].b_divided);
-    rgba8[i].x = (uchar)clamp((int)(pow(r, 1.0f / 2.2f) * 256.0f), 0, 255);
-    rgba8[i].y = (uchar)clamp((int)(pow(g, 1.0f / 2.2f) * 256.0f), 0, 255);
-    rgba8[i].z = (uchar)clamp((int)(pow(b, 1.0f / 2.2f) * 256.0f), 0, 255);
+    const float scale = 0.5f;
+    rgba8[i].x = (uchar)clamp((int)(pow(r * scale, 1.0f / 2.2f) * 256.0f), 0, 255);
+    rgba8[i].y = (uchar)clamp((int)(pow(g * scale, 1.0f / 2.2f) * 256.0f), 0, 255);
+    rgba8[i].z = (uchar)clamp((int)(pow(b * scale, 1.0f / 2.2f) * 256.0f), 0, 255);
     rgba8[i].w = 255;
 }
 #endif

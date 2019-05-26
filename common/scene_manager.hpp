@@ -187,6 +187,8 @@ namespace rt {
 				if (point_type->get(i) == "ImageEnvmap") {
 					if (auto r = p->points.column_as_string("file")) {
 						_envmapImage = load_image(r->get(i));
+						// _envmapImage->clamp_rgb(0.0f, 10000.0f);
+						// _envmapImage->clamp_rgb(0.0f, 1000.0f);
 						UniformDirectionWeight uniform_weight;
 						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
 					}
@@ -201,7 +203,7 @@ namespace rt {
 
 			auto image = std::shared_ptr<Image2D>(new Image2D());
 			image->load(absFilePath.string().c_str());
-
+			
 			// Debug
 			//image->resize(2, 2);
 			//(*image)(0, 0) = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);

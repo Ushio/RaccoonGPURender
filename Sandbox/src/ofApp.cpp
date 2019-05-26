@@ -40,7 +40,6 @@ private:
 ImageRecieverForOF colorReciever;
 ImageRecieverForOF normalReciever;
 
-
 //--------------------------------------------------------------
 void ofApp::setup() {
 	ofSetVerticalSync(false);
@@ -191,7 +190,7 @@ void ofApp::draw() {
 	ImGui::Text("FPS : %f", ofGetFrameRate());
 	ImGui::Checkbox("scene preview", &show_scene_preview);
 	ImGui::InputInt("frame", &frame);
-	
+
 	int deviceCount = context_ptr->deviceCount();
 	for (int device_index = 0; device_index < deviceCount; ++device_index) {
 		auto info = context_ptr->device_info(device_index);

@@ -4,6 +4,7 @@
 #include "types.cl"
 #include "atomic.cl"
 #include "envmap_sampling.cl"
+#include "slab.cl"
 
 // TODO: russian roulette
 
@@ -52,12 +53,16 @@ __kernel void logic(
         evalEnv = true;
     } else {
         evalEnv = false;
+        newPath = false;
+    }
 
-        if(10 < logic_i) {
-            newPath = true; // long path
-        } else {
-            newPath = false;
-        }
+    // Long Path 
+    if(10 < logic_i) {
+        newPath = true;
+    }
+    // No Contribution
+    if(compMax(wavefrontPath[gid].T) < 1.0e-5f) {
+        newPath = true;
     }
 
     if(evalEnv) {

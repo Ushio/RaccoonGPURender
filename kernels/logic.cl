@@ -3,31 +3,7 @@
 
 #include "types.cl"
 #include "atomic.cl"
-
-void cartesian_to_polar(float3 rd, float *theta, float *phi) {
-    float z = rd.y;
-    float x = rd.z;
-    float y = rd.x;
-    *theta = atan2(sqrt(x * x + y * y) , z);
-    *phi = atan2(y, x);
-    if (isfinite(*phi) == false) {
-        *phi = 0.0f;
-    }
-}
-
-float3 sample_envmap(__read_only image2d_t envmap, float3 rd) {
-    float theta, phi;
-    cartesian_to_polar(rd, &theta, &phi);
-    
-    // 1.0f - is clockwise order envmap
-    const float pi = M_PI;
-    float u = 1.0f - phi / (2.0f * pi);
-    float v = theta / pi;
-
-    // CLK_FILTER_LINEAR, CLK_ADDRESS_REPEAT
-    const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
-    return read_imagef(envmap, s, (float2)(u, v)).xyz;
-}
+#include "envmap_sampling.cl"
 
 // TODO: russian roulette
 

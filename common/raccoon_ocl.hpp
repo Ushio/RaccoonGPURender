@@ -438,6 +438,12 @@ namespace rt {
 		cl_mem memory() const {
 			return _memory.get();
 		}
+		int width() const {
+			return _width;
+		}
+		int height() const {
+			return _height;
+		}
 	private:
 		int _width;
 		int _height;

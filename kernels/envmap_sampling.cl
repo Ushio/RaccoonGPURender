@@ -21,6 +21,32 @@ typedef struct {
     int alias;
 } AliasBucket;
 
+// phi is possible to be negative.
+void cartesian_to_polar(float3 rd, float *theta, float *phi) {
+    float z = rd.y;
+    float x = rd.z;
+    float y = rd.x;
+    *theta = atan2(sqrt(x * x + y * y) , z);
+    *phi = atan2(y, x);
+    if (isfinite(*phi) == false) {
+        *phi = 0.0f;
+    }
+}
+
+float3 sample_envmap(__read_only image2d_t envmap, float3 rd) {
+    float theta, phi;
+    cartesian_to_polar(rd, &theta, &phi);
+    
+    // 1.0f - is clockwise order envmap
+    const float pi = M_PI;
+    float u = 1.0f - phi / (2.0f * pi);
+    float v = theta / pi;
+
+    // CLK_FILTER_LINEAR, CLK_ADDRESS_REPEAT
+    const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
+    return read_imagef(envmap, s, (float2)(u, v)).xyz;
+}
+
 uint alias_method(uint4 *state, __global const AliasBucket *aliasBuckets, uint aliasBucketsCount) {
     uint sampled_index = (uint)(random_uniform_integer(state) % (ulong)aliasBucketsCount);
     int alias = aliasBuckets[sampled_index].alias;
@@ -40,6 +66,27 @@ float3 project_cylinder_to_sphere(float3 p) {
     p.x *= r_xz;
     p.z *= r_xz;
     return p;
+}
+
+int fract_int(int x, int m) {
+    int r = x % m;
+    return r < 0 ? r + m : r;
+}
+float envmap_pdf(float3 wi, __global const float *pdfs, int width, int height) {
+    float theta;
+    float phi;
+    cartesian_to_polar(wi, &theta, &phi);
+    const float pi = M_PI;
+    float u = 1.0f - phi / (2.0f * pi);
+    float v = theta / pi;
+
+    int ix = (int)floor(u * width );
+    int iy = (int)floor(v * height);
+
+    ix = fract_int(ix, width);
+    iy = clamp(iy, 0, height - 1);
+
+    return pdfs[iy * width + ix];
 }
 
 // out envmap_samples

@@ -3,6 +3,7 @@
 
 #include "types.cl"
 #include "peseudo_random.cl"
+#include "envmap_sampling.cl"
 
 // z up
 float3 cosine_weighted_hemisphere_z_up(float a, float b) {
@@ -16,9 +17,9 @@ float3 cosine_weighted_hemisphere_z_up(float a, float b) {
 	float z = sqrt(max(1.0f - a, 0.0f));
 	return (float3)(x, y, z);
 }
-float pdf_cosine_weighted_hemisphere_z_up(float3 sampled_wi) {
-	double cosTheta = max(sampled_wi.z, 0.0f);
-	return cosTheta / M_PI;
+float pdf_cosine_weighted_hemisphere_z_up(float z) {
+	float cosTheta = max(z, 0.0f);
+	return cosTheta / (float)(M_PI);
 }
 
 // Building an Orthonormal Basis, Revisited
@@ -31,14 +32,6 @@ void get_orthonormal_basis(float3 zaxis, float3 *xaxis, float3 *yaxis) {
 	*yaxis = (float3)(b, sign + zaxis.y * zaxis.y * a, -zaxis.y);
 }
 
-// float3 lambertian_brdf(float3 wi, float3 wo, float3 Cd, float3 Ng) {
-// 	// The wo, wi is over the boundary.
-// 	if (dot(Ng, wi) * dot(Ng, wo) < 0.0f) {
-// 		return (float3)(0.0f);
-// 	}
-// 	return Cd / (float)M_PI;
-// }
-
 __kernel void lambertian(
     __global WavefrontPath *wavefrontPath, 
     __global uint4 *random_states,
@@ -47,7 +40,9 @@ __kernel void lambertian(
     __global const uint *lambertian_queue_item, 
     __global const uint *lambertian_queue_count,
     __global const Material *materials,
-    __global const Lambertian *lambertians) {
+    __global const Lambertian *lambertians,
+    __global const EnvmapSample *envmap_samples,
+    __global const float *envmap_pdfs, int width, int height) {
 
     uint gid = get_global_id(0);
     uint count = *lambertian_queue_count;
@@ -71,19 +66,52 @@ __kernel void lambertian(
         Ng = -Ng;
     }
 
-    // Sampling wi, TODO Mixture Density
+    // Sampling Lambertian
+    // uint4 random_state = random_states[path_index];
+    // float3 wi_local = cosine_weighted_hemisphere_z_up(random_uniform(&random_state), random_uniform(&random_state));
+    // random_states[path_index] = random_state;
+    // float3 xaxis;
+    // float3 yaxis;
+    // float3 zaxis = Ng;
+    // get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+    // float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+    // float pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+
+    // Sampling Envmap
+    // float3 wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
+    // float pdf = envmap_samples[path_index].pdf;
+
+    // Mixture Density
     uint4 random_state = random_states[path_index];
-    float3 wi_local = cosine_weighted_hemisphere_z_up(random_uniform(&random_state), random_uniform(&random_state));
+    float u0 = random_uniform(&random_state);
+    float u1 = random_uniform(&random_state);
     random_states[path_index] = random_state;
 
-    float3 xaxis;
-    float3 yaxis;
-    float3 zaxis = Ng;
-    get_orthonormal_basis(zaxis, &xaxis, &yaxis);
-    float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
-    float pdf_w = pdf_cosine_weighted_hemisphere_z_up(wi_local);
+    float3 wi;
+    float pdf_brdf;
+    float pdf_envmap;
 
-    float3 T = (lambertian.R / (float)(M_PI)) * fabs(dot(wi, Ng)) / pdf_w;
+    const float lambertian_probability = 0.5f;
+    if(u0 < lambertian_probability) {
+        u0 /= lambertian_probability;
+
+        float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
+        float3 xaxis;
+        float3 yaxis;
+        float3 zaxis = Ng;
+        get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+        wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+        pdf_envmap = envmap_pdf(wi, envmap_pdfs, width, height);
+        pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+    } else {
+        wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
+        pdf_envmap = envmap_samples[path_index].pdf;
+        pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
+    }
+    float pdf = pdf_brdf * lambertian_probability + pdf_envmap * (1.0f - lambertian_probability);
+
+    float cosTheta = dot(wi, Ng);
+    float3 T = cosTheta < 0.0 ? (float3)(0.0) : ((lambertian.R / (float)(M_PI)) * cosTheta / pdf);
 
     shading_results[path_index].Le = lambertian.Le;
     shading_results[path_index].T = T;

@@ -120,9 +120,24 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
 	};
 
+	struct EnvmapFragment {
+		float beg_y = 0.0f;
+		float end_y = 0.0f;
+		float beg_phi = 0.0f;
+		float end_phi = 0.0f;
+	};
+
+	struct AliasBucket {
+		float height = 0.0f;
+		int alias = 0;
+	};
+
 	class EnvmapBuffer {
 	public:
 		std::unique_ptr<OpenCLImage> envmap;
+		std::unique_ptr<OpenCLBuffer<float>> pdfs;
+		std::unique_ptr<OpenCLBuffer<EnvmapFragment>> fragments;
+		std::unique_ptr<OpenCLBuffer<AliasBucket>> aliasBuckets;
 	};
 
 	class SceneManager {
@@ -253,6 +268,30 @@ namespace rt {
 		std::unique_ptr<EnvmapBuffer> createEnvmapBuffer(cl_context context) const {
 			std::unique_ptr<EnvmapBuffer> buffer(new EnvmapBuffer());
 			buffer->envmap = std::unique_ptr<OpenCLImage>(new OpenCLImage(context, _envmapImage->data(), _envmapImage->width(), _envmapImage->height()));
+			
+			int n = _imageEnvmap->_pdf.size();
+			std::vector<float> pdfs(n);
+			for (int i = 0; i < n; ++i) {
+				pdfs[i] = _imageEnvmap->_pdf[i];
+			}
+			buffer->pdfs = std::unique_ptr<OpenCLBuffer<float>>(new OpenCLBuffer<float>(context, pdfs.data(), n, OpenCLKernelBufferMode::ReadOnly));
+			
+			std::vector<EnvmapFragment> fragments(n);
+			for (int i = 0; i < n; ++i) {
+				fragments[i].beg_phi = _imageEnvmap->_fragments[i].beg_phi;
+				fragments[i].end_phi = _imageEnvmap->_fragments[i].end_phi;
+				fragments[i].beg_y   = _imageEnvmap->_fragments[i].beg_y;
+				fragments[i].end_y   = _imageEnvmap->_fragments[i].end_y;
+			}
+			buffer->fragments = std::unique_ptr<OpenCLBuffer<EnvmapFragment>>(new OpenCLBuffer<EnvmapFragment>(context, fragments.data(), n, OpenCLKernelBufferMode::ReadOnly));
+			
+			std::vector<AliasBucket> aliasBuckets(n);
+			for (int i = 0; i < n; ++i) {
+				aliasBuckets[i].height = _imageEnvmap->_aliasMethod.buckets[i].height;
+				aliasBuckets[i].alias  = _imageEnvmap->_aliasMethod.buckets[i].alias;
+			}
+			buffer->aliasBuckets = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBuckets.data(), n, OpenCLKernelBufferMode::ReadOnly));
+
 			return buffer;
 		}
 

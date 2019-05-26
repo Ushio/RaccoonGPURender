@@ -230,50 +230,6 @@ namespace rt {
 		std::queue<std::function<void(void)>> _items;
 	};
 
-	//template <class T>
-	//class ReadableBuffer {
-	//public:
-	//	ReadableBuffer(cl_context context, cl_command_queue queue, int size) {
-	//		_buffer = unique(new OpenCLBuffer<T>(context, size));
-	//		_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::ReadOnly));
-	//	}
-
-	//	void transfer_finish_before_touch_buffer(cl_command_queue queue) {
-	//		// Before touch to buffer, we must wait for unlock event.
-	//		if (_buffer_pinned_lock) {
-	//			_buffer_pinned_lock->enqueue_marker(queue);
-	//			_buffer_pinned_lock = std::shared_ptr<OpenCLCustomEvent>();
-	//		}
-	//	}
-
-	//	void invoke_data_transfer(cl_context context, cl_command_queue queue_data_transfer, cl_event event_before_transfer, WorkerThread *worker, std::function<void(T *)> on_transfer_finished) {
-	//		// Launch "copy to host" concurrently, but wait for last kernel execution.
-	//		auto transfer_event = _buffer->copy_to_host(_buffer_pinned.get(), queue_data_transfer, event_before_transfer);
-
-	//		auto ptr = _buffer_pinned->ptr();
-
-	//		// Create lock for touch ptr.
-	//		auto lock = std::shared_ptr<OpenCLCustomEvent>(new OpenCLCustomEvent(context));
-	//		_buffer_pinned_lock = lock;
-
-	//		// wait for workerthread.
-	//		worker->run([transfer_event, on_transfer_finished, lock, ptr]() {
-	//			transfer_event->wait();
-	//			
-	//			on_transfer_finished(ptr);
-
-	//			lock->complete();
-	//		});
-	//	}
-	//	cl_mem memory() const {
-	//		return _buffer->memory();
-	//	}
-	//private:
-	//	std::unique_ptr<OpenCLBuffer<T>> _buffer;
-	//	std::unique_ptr<OpenCLPinnedBuffer<T>> _buffer_pinned;
-	//	std::shared_ptr<OpenCLCustomEvent> _buffer_pinned_lock;
-	//};
-
 	template <class T>
 	class ReadableBuffer {
 	public:
@@ -394,6 +350,9 @@ namespace rt {
 			OpenCLProgram program_logic("logic.cl", lane.context, lane.device_id);
 			_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
 
+			OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id);
+			_kernel_envmap_sampling = unique(new OpenCLKernel("envmap_sampling", program_envmap_sampling.program()));
+
 			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
 			_kernel_lambertian = unique(new OpenCLKernel("lambertian", program_lambertian.program()));
 			_kernel_finalize_lambertian = unique(new OpenCLKernel("finalize_lambertian", program_lambertian.program()));
@@ -411,6 +370,9 @@ namespace rt {
 			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
 			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
+
+			// envmap
+			_mem_envmap_samples = unique(new OpenCLBuffer<EnvmapSample>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
 			uint32_t kZero32 = 0;
 			_queue_new_path_item = unique(new OpenCLBuffer<uint32_t>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -507,6 +469,21 @@ namespace rt {
 				_kernel_finalize_new_path->setArgument(1, _queue_new_path_count->memory());
 				_eventQueue += _kernel_finalize_new_path->launch(_lane.queue, 0, 1);
 			}
+
+			//{
+			//	int arg = 0;
+			//	_kernel_envmap_sampling->setArgument(arg++, _mem_path->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _mem_random_state->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _mem_shading_results->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_item->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_count->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _mem_envmap_samples->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->pdfs->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->aliasBuckets->memory());
+			//	_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->size());
+			//	_kernel_envmap_sampling->launch(_lane.queue, 0, _wavefrontPathCount);
+			//}
 
 			{
 				int arg = 0;
@@ -665,6 +642,8 @@ namespace rt {
 
 		std::unique_ptr<OpenCLKernel> _kernel_logic;
 
+		std::unique_ptr<OpenCLKernel> _kernel_envmap_sampling;
+
 		std::unique_ptr<OpenCLKernel> _kernel_lambertian;
 		std::unique_ptr<OpenCLKernel> _kernel_finalize_lambertian;
 
@@ -683,6 +662,13 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<uint64_t>>      _mem_next_pixel_index;
 		std::unique_ptr<OpenCLBuffer<ExtensionResult>> _mem_extension_results;
 		std::unique_ptr<OpenCLBuffer<ShadingResult>> _mem_shading_results;
+
+		// envmap
+		struct EnvmapSample {
+			float x, y, z;
+			float pdf;
+		};
+		std::unique_ptr<OpenCLBuffer<EnvmapSample>> _mem_envmap_samples;
 
 		// queues
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_new_path_item;

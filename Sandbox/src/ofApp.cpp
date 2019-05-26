@@ -18,7 +18,7 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
-			ofSaveImage(_imagedata, "render.png");
+			// ofSaveImage(_imagedata, "render.png");
 		}
 		_dirty = true;
 	}

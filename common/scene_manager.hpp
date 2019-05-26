@@ -3,16 +3,101 @@
 #include <vector>
 #include <glm/glm.hpp>
 #include "houdini_alembic.hpp"
-#include "gpu/raccoon_ocl.hpp"
-//#include "threaded_bvh.hpp"
+#include "raccoon_ocl.hpp"
 #include "stackless_bvh.hpp"
+#include "material_type.hpp"
 
 namespace rt {
-	//typedef struct {
-	//	AABB bounds;
-	//	int32_t primitive_indices_beg = 0;
-	//	int32_t primitive_indices_end = 0;
-	//} MTBVHNodeWithoutLink;
+	struct MaterialStorage {
+		std::vector<Material> materials;
+		std::vector<Lambertian> lambertians;
+
+		void add(const Lambertian &lambertian) {
+			int index = (int)lambertians.size();
+			materials.emplace_back(Material(kMaterialType_Lambertian, index));
+			lambertians.emplace_back(lambertian);
+		}
+	};
+
+	// polymesh
+	inline void add_materials(MaterialStorage *storage, houdini_alembic::PolygonMeshObject *p, const glm::mat3 &xformInverseTransposed) {
+		storage->materials.reserve(storage->materials.size() + p->primitives.rowCount());
+
+		auto fallback_material = []() {
+			return Lambertian(glm::vec3(), glm::vec3(0.9f, 0.1f, 0.9f), false);
+		};
+
+		// fallback
+		auto material_string = p->primitives.column_as_string("material");
+		if (material_string == nullptr) {
+			for (uint32_t i = 0, n = p->indices.size() / 3; i < n; ++i) {
+				storage->add(fallback_material());
+			}
+			return;
+		}
+		
+		for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
+			const std::string m = material_string->get(i);
+
+			using namespace rttr;
+
+			type t = type::get_by_name(m);
+
+			// fallback
+			if (t.is_valid() == false) {
+				storage->add(fallback_material());
+				continue;
+			}
+			// std::cout << t.get_name();
+			variant instance = t.create();
+			for (auto& prop : t.get_properties()) {
+				auto meta = prop.get_metadata(kGeoScopeKey);
+				RT_ASSERT(meta.is_valid());
+
+				GeoScope scope = meta.get_value<GeoScope>();
+				auto value = prop.get_value(instance);
+
+				switch (scope)
+				{
+				//case rt::GeoScope::Vertices:
+				//	if (value.is_type<std::array<glm::vec3, 3>>()) {
+				//		if (auto v = p->vertices.column_as_vector3(prop.get_name().data())) {
+				//			std::array<glm::vec3, 3> value;
+				//			for (int j = 0; j < value.size(); ++j) {
+				//				v->get(i * 3 + j, glm::value_ptr(value[j]));
+				//			}
+				//			prop.set_value(instance, value);
+				//		}
+				//	}
+				//	break;
+				case rt::GeoScope::Primitives:
+					if (value.is_type<OpenCLFloat3>()) {
+						if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
+							glm::vec3 value;
+							v->get(i, glm::value_ptr(value));
+							prop.set_value(instance, OpenCLFloat3(value));
+						}
+					}
+					else if (value.is_type<int>()) {
+						if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
+							prop.set_value(instance, v->get(i));
+						}
+					}
+					else if (value.is_type<float>()) {
+						if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
+							prop.set_value(instance, v->get(i));
+						}
+					}
+					break;
+				}
+			}
+		
+			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
+				storage->add(*instance.get_value<std::shared_ptr<Lambertian>>());
+			}
+		}
+	}
+
 
 	struct alignas(16) TrianglePrimitive {
 		uint32_t indices[3];
@@ -27,8 +112,17 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<OpenCLFloat3>> pointsCL;
 	};
 
+	class MaterialBuffer {
+	public:
+		std::unique_ptr<OpenCLBuffer<Material>> materials;
+		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
+	};
+
 	class SceneManager {
 	public:
+		SceneManager():_material_storage(new MaterialStorage()){
+
+		}
 		void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
 			bool isTriangleMesh = std::all_of(p->faceCounts.begin(), p->faceCounts.end(), [](int32_t f) { return f == 3; });
 			if (isTriangleMesh == false) {
@@ -55,6 +149,8 @@ namespace rt {
 			}
 
 			RT_ASSERT(std::all_of(_indices.begin(), _indices.end(), [&](uint32_t index) { return index < _points.size(); }));
+
+			add_materials(_material_storage.get(), p, xformInverseTransposed);
 		}
 
 		void buildBVH() {
@@ -103,6 +199,12 @@ namespace rt {
 			buffer->primitive_idsCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), OpenCLKernelBufferMode::ReadOnly));
 			return buffer;
 		}
+		std::unique_ptr<MaterialBuffer> createMaterialBuffer(cl_context context) const {
+			std::unique_ptr<MaterialBuffer> buffer(new MaterialBuffer());
+			buffer->materials = std::unique_ptr<OpenCLBuffer<Material>>(new OpenCLBuffer<Material>(context, _material_storage->materials.data(), _material_storage->materials.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->lambertians = std::unique_ptr<OpenCLBuffer<Lambertian>>(new OpenCLBuffer<Lambertian>(context, _material_storage->lambertians.data(), _material_storage->lambertians.size(), OpenCLKernelBufferMode::ReadOnly));
+			return buffer;
+		}
 
 		std::vector<uint32_t> _indices;
 		std::vector<OpenCLFloat3> _points;
@@ -111,5 +213,8 @@ namespace rt {
 
 		// 現在は冗長
 		std::vector<TrianglePrimitive> _primitives;
+
+		// Material
+		std::unique_ptr<MaterialStorage> _material_storage;
 	};
 }

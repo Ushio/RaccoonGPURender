@@ -121,12 +121,13 @@ bool intersect_bvh(
 			int beg = nodes[node].primitive_indices_beg;
 	  		int end = nodes[node].primitive_indices_end;
 			for (int i = beg; i < end; ++i) {
-				int index = primitive_ids[i] * 3;
+				uint this_primitive_index = primitive_ids[i];
+				int index = this_primitive_index * 3;
 				float3 v0 = points[indices[index + 0]].xyz;
 				float3 v1 = points[indices[index + 1]].xyz;
 				float3 v2 = points[indices[index + 2]].xyz;
 				if (intersect_ray_triangle(ro, rd, v0, v1, v2, &tmin, &uv)) {
-					primitive_index = index;
+					primitive_index = this_primitive_index;
 					intersected = true;
 				}
 			}
@@ -168,11 +169,11 @@ __kernel void extension_ray_cast(
 
 	RayHit hit;
 	if(intersect_bvh(nodes, primitive_ids, indices, points, ro, rd, &hit) == false) {
-		results[gid].material_id = -1;
+		results[gid].hit_primitive_id = -1;
 		return;
 	}
 	
-	int index = hit.primitive_index;
+	int index = hit.primitive_index * 3;
 	float3 v0 = points[indices[index + 0]].xyz;
 	float3 v1 = points[indices[index + 1]].xyz;
 	float3 v2 = points[indices[index + 2]].xyz;
@@ -183,7 +184,7 @@ __kernel void extension_ray_cast(
 	// ClockWise (CW)
 	float3 Ng = normalize(cross(v2 - v1, v1 - v0));
 
-	results[gid].material_id = 0;
+	results[gid].hit_primitive_id = hit.primitive_index;
 	results[gid].tmin = hit.tmin;
 	results[gid].Ng = Ng;
 }

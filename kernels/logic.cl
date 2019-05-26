@@ -40,12 +40,12 @@ __kernel void logic(
     wavefrontPath[gid].L += wavefrontPath[gid].T * shading_results[gid].Le;
     wavefrontPath[gid].T *= shading_results[gid].T;
     
-    int material_id = extension_results[gid].material_id;
+    int hit_primitive_id = extension_results[gid].hit_primitive_id;
 
     bool evalEnv;
     bool newPath;
 
-    if(material_id < 0) {
+    if(hit_primitive_id < 0) {
         newPath = true;
         evalEnv = true;
     } else {
@@ -67,7 +67,7 @@ __kernel void logic(
     // debug normal
     if(logic_i == 0) {
         float3 color;
-        if(material_id < 0) {
+        if(hit_primitive_id < 0) {
             color = (float3)(0.0f);
         } else {
             color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;

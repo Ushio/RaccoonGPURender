@@ -9,7 +9,7 @@ __kernel void visualize_intersect_normal(__global WavefrontPath* wavefrontPath, 
     uint index = wavefrontPath[gid].pixel_index;
     float3 color = (results[gid].Ng + (float3)(1.0f)) * 0.5f;
     // float3 color = results[gid].Ng;
-    if(results[gid].material_id < 0) {
+    if(results[gid].hit_primitive_id < 0) {
         // no hit
         atomic_add_global(&rgb[index].sampleCount, 1.0f);
     } else {

@@ -45,7 +45,9 @@ __kernel void lambertian(
     __global const ExtensionResult *extension_results,
     __global ShadingResult *shading_results,
     __global const uint *lambertian_queue_item, 
-    __global const uint *lambertian_queue_count) {
+    __global const uint *lambertian_queue_count,
+    __global const Material *materials,
+    __global const Lambertian *lambertians) {
 
     uint gid = get_global_id(0);
     uint count = *lambertian_queue_count;
@@ -53,6 +55,10 @@ __kernel void lambertian(
         return;
     }
     uint path_index = lambertian_queue_item[gid];
+
+    int hit_primitive_id = extension_results[path_index].hit_primitive_id;
+    Lambertian lambertian = lambertians[materials[hit_primitive_id].material_index];
+
     float tmin = extension_results[path_index].tmin;
     float3 Ng = extension_results[path_index].Ng;
     float3 ro = wavefrontPath[path_index].ro;
@@ -77,10 +83,9 @@ __kernel void lambertian(
     float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
     float pdf_w = pdf_cosine_weighted_hemisphere_z_up(wi_local);
 
-    float R = 0.8f;
-    float3 T = (R / M_PI) * fabs(dot(wi, Ng)) / pdf_w;
-    
-    shading_results[path_index].Le = (float3)(0.0f);
+    float3 T = (lambertian.R / (float)(M_PI)) * fabs(dot(wi, Ng)) / pdf_w;
+
+    shading_results[path_index].Le = lambertian.Le;
     shading_results[path_index].T = T;
 
     ro = ro + rd * tmin + wi * 1.0e-5f + Ng * 1.0e-5f;

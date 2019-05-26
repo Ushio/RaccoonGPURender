@@ -132,10 +132,14 @@ namespace rt {
 
 		}
 		void add(std::shared_ptr<OpenCLEvent> event, std::function<void(void)> on_finished = [](){}) {
+			event->wait();
+
 			Item item;
 			item.event = event;
 			item.on_finished = on_finished;
 			_queue.push(item);
+
+			_last_event = event;
 
 			while(_queue.empty() == false) {
 				auto front = _queue.front();
@@ -171,16 +175,14 @@ namespace rt {
 			add(e);
 		}
 		std::shared_ptr<OpenCLEvent> last_event() {
-			if (_queue.empty()) {
-				return std::shared_ptr<OpenCLEvent>();
-			}
-			return _queue.back().event;
+			return _last_event;
 		}
 		struct Item {
 			std::shared_ptr<OpenCLEvent> event;
 			std::function<void(void)> on_finished;
 		};
 		std::queue<Item> _queue;
+		std::shared_ptr<OpenCLEvent> _last_event;
 		int _maxItem = 6;
 	};
 
@@ -417,6 +419,7 @@ namespace rt {
 			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1, OpenCLKernelBufferMode::ReadWrite));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
+			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
 
 			// accumlation
 			_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
@@ -512,6 +515,8 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _mem_shading_results->memory());
 				_kernel_lambertian->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_lambertian->setArgument(arg++, _queue_lambertian_count->memory());
+				_kernel_lambertian->setArgument(arg++, _materialBuffer->materials->memory());
+				_kernel_lambertian->setArgument(arg++, _materialBuffer->lambertians->memory());
 				_kernel_lambertian->launch(_lane.queue, 0, _wavefrontPathCount);
 
 				_kernel_finalize_lambertian->setArgument(0, _queue_lambertian_count->memory());
@@ -644,6 +649,7 @@ namespace rt {
 		std::unique_ptr<OpenCLQueue> _worker_queue;
 
 		std::unique_ptr<SceneBuffer> _sceneBuffer;
+		std::unique_ptr<MaterialBuffer> _materialBuffer;
 
 		// kernels
 		std::unique_ptr<OpenCLKernel> _kernel_random_initialize;

@@ -11,7 +11,7 @@ typedef struct {
 } WavefrontPath;
 
 typedef struct {
-    int material_id;
+    int hit_primitive_id;
     float tmin;
     float3 Ng;
 } ExtensionResult;
@@ -34,5 +34,18 @@ typedef __attribute__ ((aligned(8))) struct {
     half b_divided;
     half sampleCount;
 } RGB16AccumulationValueType;
+
+#define kMaterialType_Lambertian 0
+
+typedef struct {
+    int material_type;
+    int material_index;
+} Material;
+
+typedef struct {
+    float3 Le;
+    float3 R;
+    int BackEmission;
+} Lambertian;
 
 #endif

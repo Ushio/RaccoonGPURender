@@ -284,12 +284,22 @@ namespace rt {
 			buffer->primitive_idsCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), OpenCLKernelBufferMode::ReadOnly));
 			return buffer;
 		}
+
+		template <class T>
+		std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, std::size_t size) const {
+			if (size == 0) {
+				T one;
+				return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, &one, 1, OpenCLKernelBufferMode::ReadOnly));
+			}
+			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, data, size, OpenCLKernelBufferMode::ReadOnly));
+		}
+
 		std::unique_ptr<MaterialBuffer> createMaterialBuffer(cl_context context) const {
 			std::unique_ptr<MaterialBuffer> buffer(new MaterialBuffer());
-			buffer->materials = std::unique_ptr<OpenCLBuffer<Material>>(new OpenCLBuffer<Material>(context, _material_storage->materials.data(), _material_storage->materials.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->lambertians = std::unique_ptr<OpenCLBuffer<Lambertian>>(new OpenCLBuffer<Lambertian>(context, _material_storage->lambertians.data(), _material_storage->lambertians.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->speculars = std::unique_ptr<OpenCLBuffer<Specular>>(new OpenCLBuffer<Specular>(context, _material_storage->speculars.data(), _material_storage->speculars.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->dierectrics = std::unique_ptr<OpenCLBuffer<Dierectric>>(new OpenCLBuffer<Dierectric>(context, _material_storage->dierectrics.data(), _material_storage->dierectrics.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->materials = createBufferSafe(context, _material_storage->materials.data(), _material_storage->materials.size());
+			buffer->lambertians = createBufferSafe(context, _material_storage->lambertians.data(), _material_storage->lambertians.size());
+			buffer->speculars = createBufferSafe(context, _material_storage->speculars.data(), _material_storage->speculars.size());
+			buffer->dierectrics = createBufferSafe(context, _material_storage->dierectrics.data(), _material_storage->dierectrics.size());
 			return buffer;
 		}
 

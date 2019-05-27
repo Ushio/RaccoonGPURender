@@ -7,6 +7,29 @@
 float3 reflect(float3 d, float3 n) {
     return d - 2.0f * dot(d, n) * n;
 }
+// etaは相対屈折率
+inline bool refract(float3 *refraction, float3 d, float3 n, float eta_i, float eta_t) {
+    float eta = eta_i / eta_t;
+    float NoD = dot(n, d);
+    float k = 1.0f - eta * eta * (1.0f - NoD * NoD);
+    if (k <= 0.0f) {
+        return false;
+    }
+    *refraction = eta * d - (eta * NoD + sqrt(k)) * n;
+    return true;
+}
+
+float sqr(float x) {
+    return x * x;
+}
+float fresnel_dielectrics(float cosTheta, float eta_t, float eta_i) {
+    float c = cosTheta;
+    float g = sqrt(eta_t * eta_t / sqr(eta_i) - 1.0f + sqr(c));
+
+    float a = 0.5f * sqr(g - c) / sqr(g + c);
+    float b = 1.0f + sqr(c * (g + c) - 1.0f) / sqr(c * (g - c) + 1.0f);
+    return a * b;
+}
 
 __kernel void delta_materials(
     __global WavefrontPath *wavefrontPath, 
@@ -46,7 +69,7 @@ __kernel void delta_materials(
         shading_results[path_index].Le = (float3)(0.0f);
         shading_results[path_index].T = (float3)(1.0f);
 
-        ro = ro + rd * tmin + wi * 1.0e-5f + Ng * 1.0e-5f;
+        ro = ro + rd * tmin + wi * 1.0e-5f;
         rd = wi;
         
         wavefrontPath[path_index].ro = ro;
@@ -66,18 +89,44 @@ __kernel void delta_materials(
         float3 rd = wavefrontPath[path_index].rd;
         float3 wo = -rd;
 
-        // make 0.0 < dot(Ng, wo) always
         bool backside = dot(Ng, wo) < 0.0f;
+
+        // TODO Parameter
+        float eta_i = 1.0f;
+        float eta_t = 1.5f;
+
+        if(backside) {
+            float eta = eta_i;
+            eta_i = eta_t;
+            eta_t = eta;
+        }
+        
         if(backside) {
             Ng = -Ng;
         }
 
-        float3 wi = reflect(rd, Ng);
+        float f = fresnel_dielectrics(fabs(dot(Ng, wo)), eta_t, eta_i);
+
+        uint4 random_state = random_states[path_index];
+        float u = random_uniform(&random_state);
+        random_states[path_index] = random_state;
+
+        float radiance_compression = 1.0f;
+        float3 wi;
+        if(u < f) {
+            wi = reflect(rd, Ng);
+        } else {
+            if(refract(&wi, rd, Ng, eta_i, eta_t) == false) {
+                wi = reflect(rd, Ng);
+            } else {
+                radiance_compression = sqr(eta_t / eta_i);
+            }
+        }
 
         shading_results[path_index].Le = (float3)(0.0f);
-        shading_results[path_index].T = (float3)(1.0f, 0.1f, 0.1f);
+        shading_results[path_index].T = (float3)(radiance_compression);
 
-        ro = ro + rd * tmin + wi * 1.0e-5f + Ng * 1.0e-5f;
+        ro = ro + rd * tmin + wi * 1.0e-5f;
         rd = wi;
         
         wavefrontPath[path_index].ro = ro;

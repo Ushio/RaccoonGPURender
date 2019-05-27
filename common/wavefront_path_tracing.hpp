@@ -496,20 +496,30 @@ namespace rt {
 				_eventQueue += _kernel_finalize_new_path->launch(_lane.queue, 0, 1);
 			}
 
+			// Simple Envmap Sampling
 			{
 				int arg = 0;
 				_kernel_envmap_sampling->setArgument(arg++, _mem_path->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _mem_random_state->memory());
-				_kernel_envmap_sampling->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_envmap_sampling->setArgument(arg++, _mem_extension_results->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_count->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _mem_envmap_samples->memory());
-				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->pdfs->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->memory());
+				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->pdfs->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->aliasBuckets->memory());
+				
+				for (int axis = 0; axis < 6; ++axis) {
+					_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->sixAxisPdfs[axis]->memory());
+				}
+				for (int axis = 0; axis < 6; ++axis) {
+					_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->sixAxisAliasBuckets[axis]->memory());
+				}
+
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->size());
-				_kernel_envmap_sampling->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_envmap_sampling->launch(_lane.queue, 0, _wavefrontPathCount)->wait();
 			}
+
 
 			if (_materialBuffer->lambertians->size() != 0) {
 				int arg = 0;
@@ -522,9 +532,14 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _materialBuffer->materials->memory());
 				_kernel_lambertian->setArgument(arg++, _materialBuffer->lambertians->memory());
 
-				// envmap
+				// envmap simple
 				_kernel_lambertian->setArgument(arg++, _mem_envmap_samples->memory());
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->pdfs->memory());
+
+				for (int axis = 0; axis < 6; ++axis) {
+					_kernel_lambertian->setArgument(arg++, _envmapBuffer->sixAxisPdfs[axis]->memory());
+				}
+
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->width());
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->height());
 

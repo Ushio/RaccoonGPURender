@@ -4,6 +4,8 @@
 #include "types.cl"
 #include "peseudo_random.cl"
 
+#define SIX_AXIS_SAMPLING 1
+
 typedef struct {
     float x, y, z;
     float pdf;
@@ -73,7 +75,8 @@ int fract_int(int x, int m) {
     int r = x % m;
     return r < 0 ? r + m : r;
 }
-float envmap_pdf(float3 wi, __global const float *pdfs, int width, int height) {
+
+int envmap_index(float3 wi, int width, int height) {
     float theta;
     float phi;
     cartesian_to_polar(wi, &theta, &phi);
@@ -86,8 +89,38 @@ float envmap_pdf(float3 wi, __global const float *pdfs, int width, int height) {
 
     ix = fract_int(ix, width);
     iy = clamp(iy, 0, height - 1);
+    
+    return iy * width + ix;
+}
+float envmap_pdf(float3 wi, __global const float *pdfs, int width, int height) {
+    return pdfs[envmap_index(wi, width, height)];
+}
 
-    return pdfs[iy * width + ix];
+float envmap_pdf_sixAxis(
+    float3 wi,
+    float3 n,
+    __global const float *sixAxisPdfs0,
+    __global const float *sixAxisPdfs1,
+    __global const float *sixAxisPdfs2,
+    __global const float *sixAxisPdfs3,
+    __global const float *sixAxisPdfs4,
+    __global const float *sixAxisPdfs5,
+    int width, int height) {
+
+    __global const float *x_pdf = 0.0f < n.x ? sixAxisPdfs0 : sixAxisPdfs1;
+    __global const float *y_pdf = 0.0f < n.y ? sixAxisPdfs2 : sixAxisPdfs3;
+    __global const float *z_pdf = 0.0f < n.z ? sixAxisPdfs4 : sixAxisPdfs5;
+
+    float3 axis_prob = n * n;
+
+    int index = envmap_index(wi, width, height);
+
+    float pdf = 0.0f;
+    pdf += axis_prob.x * x_pdf[index];
+    pdf += axis_prob.y * y_pdf[index];
+    pdf += axis_prob.z * z_pdf[index];
+
+    return pdf;
 }
 
 // out envmap_samples
@@ -98,16 +131,70 @@ __kernel void envmap_sampling(
     __global const uint *lambertian_queue_item, 
     __global const uint *lambertian_queue_count,
     __global EnvmapSample *envmap_samples,
-    __global const float *pdfs,
     __global const EnvmapFragment *fragments,
+    __global const float *pdfs,
     __global const AliasBucket *aliasBuckets,
+
+    __global const float *sixAxisPdfs0,
+    __global const float *sixAxisPdfs1,
+    __global const float *sixAxisPdfs2,
+    __global const float *sixAxisPdfs3,
+    __global const float *sixAxisPdfs4,
+    __global const float *sixAxisPdfs5,
+    __global const AliasBucket *sixAxisAliasBuckets0,
+    __global const AliasBucket *sixAxisAliasBuckets1,
+    __global const AliasBucket *sixAxisAliasBuckets2,
+    __global const AliasBucket *sixAxisAliasBuckets3,
+    __global const AliasBucket *sixAxisAliasBuckets4,
+    __global const AliasBucket *sixAxisAliasBuckets5,
+
     uint aliasBucketsCount) {
     uint i = get_global_id(0);
 
     if(i < *lambertian_queue_count) {
         uint index = lambertian_queue_item[i];
         uint4 state = random_states[index];
+
+#if SIX_AXIS_SAMPLING
+        float3 rd = wavefrontPath[index].rd;
+        float3 wo = -rd;
+        float3 n = extension_results[index].Ng;
+
+        // make 0.0 < dot(n, wo) always
+        bool backside = dot(n, wo) < 0.0f;
+        if(backside) {
+            n = -n;
+        }
+
+        __global const AliasBucket *xAliasBucket = 0.0f < n.x ? sixAxisAliasBuckets0 : sixAxisAliasBuckets1;
+        __global const AliasBucket *yAliasBucket = 0.0f < n.y ? sixAxisAliasBuckets2 : sixAxisAliasBuckets3;
+        __global const AliasBucket *zAliasBucket = 0.0f < n.z ? sixAxisAliasBuckets4 : sixAxisAliasBuckets5;
+        __global const float *x_pdf = 0.0f < n.x ? sixAxisPdfs0 : sixAxisPdfs1;
+        __global const float *y_pdf = 0.0f < n.y ? sixAxisPdfs2 : sixAxisPdfs3;
+        __global const float *z_pdf = 0.0f < n.z ? sixAxisPdfs4 : sixAxisPdfs5;
+
+        float u = random_uniform(&state);
+        float3 axis_prob = n * n;
+        __global const AliasBucket *aliasBucketSelected;
+        if(u < axis_prob.x) {
+            aliasBucketSelected = xAliasBucket;
+        } else if(u < axis_prob.x + axis_prob.y) {
+            aliasBucketSelected = yAliasBucket;
+        } else {
+            aliasBucketSelected = zAliasBucket;
+        }
+        //__global const AliasBucket *aliasBucketSelected = sixAxisAliasBuckets2;
+
+        uint indexFragment = alias_method(&state, aliasBucketSelected, aliasBucketsCount);
+        float pdf = 0.0f;
+        pdf += axis_prob.x * x_pdf[indexFragment];
+        pdf += axis_prob.y * y_pdf[indexFragment];
+        pdf += axis_prob.z * z_pdf[indexFragment];
+        // float pdf = sixAxisPdfs2[indexFragment];
+#else
         uint indexFragment = alias_method(&state, aliasBuckets, aliasBucketsCount);
+        float pdf = pdfs[indexFragment];
+#endif
         EnvmapFragment fragment = fragments[indexFragment];
 
         float y   = mix(fragment.beg_y,   fragment.end_y,   random_uniform(&state));
@@ -122,7 +209,7 @@ __kernel void envmap_sampling(
         sample.x = wi.x;
         sample.y = wi.y;
         sample.z = wi.z;
-        sample.pdf = pdfs[indexFragment];
+        sample.pdf = pdf;
         
         envmap_samples[index] = sample;
         random_states[index] = state;

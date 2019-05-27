@@ -18,7 +18,7 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
-			// ofSaveImage(_imagedata, "render.png");
+			ofSaveImage(_imagedata, "render.png");
 		}
 		_dirty = true;
 	}
@@ -79,9 +79,9 @@ void ofApp::setup() {
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
-	pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
-		normalReciever.setImageAtomic(p, w, h);
-	};
+	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
+	//	normalReciever.setImageAtomic(p, w, h);
+	//};
 	pt->launch();
 	// pt->launch_fixed(2);
 

@@ -42,7 +42,14 @@ __kernel void lambertian(
     __global const Material *materials,
     __global const Lambertian *lambertians,
     __global const EnvmapSample *envmap_samples,
-    __global const float *envmap_pdfs, int width, int height) {
+    __global const float *envmap_pdfs, 
+    __global const float *sixAxisPdfs0,
+    __global const float *sixAxisPdfs1,
+    __global const float *sixAxisPdfs2,
+    __global const float *sixAxisPdfs3,
+    __global const float *sixAxisPdfs4,
+    __global const float *sixAxisPdfs5,
+    int width, int height) {
 
     uint gid = get_global_id(0);
     uint count = *lambertian_queue_count;
@@ -101,7 +108,12 @@ __kernel void lambertian(
         float3 zaxis = Ng;
         get_orthonormal_basis(zaxis, &xaxis, &yaxis);
         wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+#if SIX_AXIS_SAMPLING
+        pdf_envmap = envmap_pdf_sixAxis(wi, Ng, sixAxisPdfs0, sixAxisPdfs1, sixAxisPdfs2, sixAxisPdfs3, sixAxisPdfs4, sixAxisPdfs5, width, height);
+        // pdf_envmap = envmap_pdf(wi, sixAxisPdfs2, width, height);
+#else
         pdf_envmap = envmap_pdf(wi, envmap_pdfs, width, height);
+#endif
         pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
     } else {
         wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);

@@ -8,6 +8,7 @@
 #include "material_type.hpp"
 #include "image2d.hpp"
 #include "envmap.hpp"
+#include "stopwatch.hpp"
 
 namespace rt {
 	struct MaterialStorage {
@@ -16,7 +17,20 @@ namespace rt {
 		std::vector<Specular>   speculars;
 		std::vector<Dierectric> dierectrics;
 		
-		// TODO duplicated cut
+		void add_variant(const rttr::variant &instance) {
+			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
+				add(*instance.get_value<std::shared_ptr<Lambertian>>());
+			}
+			else if (instance.is_type<std::shared_ptr<Specular>>()) {
+				add(*instance.get_value<std::shared_ptr<Specular>>());
+			}
+			else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
+				add(*instance.get_value<std::shared_ptr<Dierectric>>());
+			}
+			else {
+				RT_ASSERT(0);
+			}
+		}
 		void add(const Lambertian &lambertian) {
 			int index = (int)lambertians.size();
 			materials.emplace_back(Material(kMaterialType_Lambertian, index));
@@ -106,19 +120,7 @@ namespace rt {
 					break;
 				}
 			}
-		
-			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
-				storage->add(*instance.get_value<std::shared_ptr<Lambertian>>());
-			}
-			else if (instance.is_type<std::shared_ptr<Specular>>()) {
-				storage->add(*instance.get_value<std::shared_ptr<Specular>>());
-			}
-			else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
-				storage->add(*instance.get_value<std::shared_ptr<Dierectric>>());
-			}
-			else {
-				RT_ASSERT(0);
-			}
+			storage->add_variant(instance);
 		}
 	}
 
@@ -162,6 +164,9 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<float>> pdfs;
 		std::unique_ptr<OpenCLBuffer<EnvmapFragment>> fragments;
 		std::unique_ptr<OpenCLBuffer<AliasBucket>> aliasBuckets;
+
+		std::unique_ptr<OpenCLBuffer<float>> sixAxisPdfs[6];
+		std::unique_ptr<OpenCLBuffer<AliasBucket>> sixAxisAliasBuckets[6];
 	};
 
 	class SceneManager {
@@ -215,6 +220,12 @@ namespace rt {
 						// _envmapImage->clamp_rgb(0.0f, 100.0f);
 						UniformDirectionWeight uniform_weight;
 						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
+						_sixAxisImageEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XPlus)));
+						_sixAxisImageEnvmap[1] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XMinus)));
+						_sixAxisImageEnvmap[2] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YPlus)));
+						_sixAxisImageEnvmap[3] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YMinus)));
+						_sixAxisImageEnvmap[4] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZPlus)));
+						_sixAxisImageEnvmap[5] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZMinus)));
 					}
 				}
 			}
@@ -330,6 +341,21 @@ namespace rt {
 			}
 			buffer->aliasBuckets = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBuckets.data(), n, OpenCLKernelBufferMode::ReadOnly));
 
+			for (int axis = 0; axis < 6; ++axis) {
+				std::vector<float> pdfs(n);
+				for (int i = 0; i < n; ++i) {
+					pdfs[i] = _sixAxisImageEnvmap[axis]->_pdf[i];
+				}
+				buffer->sixAxisPdfs[axis] = std::unique_ptr<OpenCLBuffer<float>>(new OpenCLBuffer<float>(context, pdfs.data(), n, OpenCLKernelBufferMode::ReadOnly));
+
+				std::vector<AliasBucket> aliasBuckets(n);
+				for (int i = 0; i < n; ++i) {
+					aliasBuckets[i].height = _sixAxisImageEnvmap[axis]->_aliasMethod.buckets[i].height;
+					aliasBuckets[i].alias = _sixAxisImageEnvmap[axis]->_aliasMethod.buckets[i].alias;
+				}
+				buffer->sixAxisAliasBuckets[axis] = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBuckets.data(), n, OpenCLKernelBufferMode::ReadOnly));
+			}
+
 			return buffer;
 		}
 
@@ -348,5 +374,6 @@ namespace rt {
 
 		std::shared_ptr<Image2D> _envmapImage;
 		std::shared_ptr<ImageEnvmap> _imageEnvmap;
+		std::shared_ptr<ImageEnvmap> _sixAxisImageEnvmap[6];
 	};
 }

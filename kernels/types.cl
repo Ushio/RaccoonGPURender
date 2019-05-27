@@ -36,6 +36,7 @@ typedef __attribute__ ((aligned(8))) struct {
 } RGB16AccumulationValueType;
 
 #define kMaterialType_Lambertian 0
+#define kMaterialType_Specular   1
 
 typedef struct {
     int material_type;
@@ -47,5 +48,9 @@ typedef struct {
     float3 R;
     int BackEmission;
 } Lambertian;
+
+typedef struct {
+    
+} Specular;
 
 #endif

@@ -314,6 +314,11 @@ namespace rt {
 			: _context(context)
 			, _length(length) {
 
+			if (_length == 0) {
+				_memory = decltype(_memory)(nullptr);
+				return;
+			}
+
 			cl_mem_flags mem_flags = CL_MEM_READ_WRITE;
 			switch (mode) {
 			case OpenCLKernelBufferMode::ReadWrite:
@@ -339,6 +344,11 @@ namespace rt {
 		OpenCLBuffer(cl_context context, uint32_t length, OpenCLKernelBufferMode mode)
 			: _context(context)
 			, _length(length) {
+
+			if (_length == 0) {
+				_memory = decltype(_memory)(nullptr);
+				return;
+			}
 
 			cl_mem_flags mem_flags = CL_MEM_READ_WRITE;
 			switch (mode) {

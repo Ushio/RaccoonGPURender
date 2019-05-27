@@ -123,7 +123,4 @@ __kernel void lambertian(
     wavefrontPath[path_index].rd = rd;
 }
 
-__kernel void finalize_lambertian(__global uint *lambertian_queue_count) {
-    *lambertian_queue_count = 0;
-}
 #endif

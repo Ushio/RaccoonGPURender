@@ -32,10 +32,13 @@ __kernel void logic(
     __read_only image2d_t envmap,
     __global RGB32AccumulationValueType *rgb32accum,
     __global RGB32AccumulationValueType *normal32accum,
+    __global const Material *materials,
     __global uint *new_path_queue_item,
     __global uint *new_path_queue_count,
     __global uint *lambertian_queue_item, 
-    __global uint *lambertian_queue_count) {
+    __global uint *lambertian_queue_count,
+    __global uint *delta_material_queue_item, 
+    __global uint *delta_material_queue_count) {
     
     uint gid = get_global_id(0);
     uint logic_i = wavefrontPath[gid].logic_i++;
@@ -118,54 +121,56 @@ __kernel void logic(
         }
     }
 
+#define NUMBER_OF_QUEUE 3
+
+    uint enqueue_index;
+    if(newPath) {
+        enqueue_index = 0;
+    } else {
+        int material_type = materials[hit_primitive_id].material_type;
+        switch(material_type) {
+        case kMaterialType_Lambertian:
+            enqueue_index = 1;
+            break;
+        case kMaterialType_Specular:
+            enqueue_index = 2;
+            break;
+        }
+    }
+
+    __global uint *global_queue_items [NUMBER_OF_QUEUE] = {new_path_queue_item,  lambertian_queue_item,  delta_material_queue_item};
+    __global uint *global_queue_counts[NUMBER_OF_QUEUE] = {new_path_queue_count, lambertian_queue_count, delta_material_queue_count};
+    
+
     // add queue process (naive) 
-    // if(newPath) {
-    //     // No hit, so add to new path queue. 
-    //     uint queue_index = atomic_inc(new_path_queue_count);
-    //     new_path_queue_item[queue_index] = gid;
-    // } else {
-    //     // evaluate material
-    //     uint queue_index = atomic_inc(lambertian_queue_count);
-    //     lambertian_queue_item[queue_index] = gid;
-    // }
+    // uint item_index = atomic_inc(global_queue_counts[enqueue_index]);
+    // global_queue_items[enqueue_index][item_index] = gid;
 
     // add queue process (2 stage ver)
-    __local uint local_new_path_queue_count;
-    __local uint local_lambertian_queue_count;
-
-    if(get_local_id(0) == 0) { 
-        local_new_path_queue_count = 0; 
-        local_lambertian_queue_count = 0;
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    uint local_new_path_queue_index = 0;
-    uint local_lambertian_queue_index = 0;
-
-    if(newPath) {
-        local_new_path_queue_index = atomic_inc(&local_new_path_queue_count);
-    } else {
-        local_lambertian_queue_index = atomic_inc(&local_lambertian_queue_count);
-    }
-
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    __local uint local_offset_new_path_queue_count;
-    __local uint local_offset_lambertian_queue_count;
+    __local uint local_queue_counts[NUMBER_OF_QUEUE];
+    uint index_at_local;
+    __local uint local_queue_offsets[NUMBER_OF_QUEUE];
 
     if(get_local_id(0) == 0) {
-        local_offset_new_path_queue_count = atomic_add(new_path_queue_count, local_new_path_queue_count);
-        local_offset_lambertian_queue_count = atomic_add(lambertian_queue_count, local_lambertian_queue_count);
+        for(int i = 0 ; i < NUMBER_OF_QUEUE ; ++i) {
+            local_queue_counts[i] = 0;
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    index_at_local = atomic_inc(&local_queue_counts[enqueue_index]);
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if(get_local_id(0) == 0) {
+        for(int i = 0 ; i < NUMBER_OF_QUEUE ; ++i) {
+            local_queue_offsets[i] = atomic_add(global_queue_counts[i], local_queue_counts[i]);
+        }
     }
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    if(newPath) {
-        uint queue_index = local_new_path_queue_index + local_offset_new_path_queue_count;
-        new_path_queue_item[queue_index] = gid;
-    } else {
-        uint queue_index = local_lambertian_queue_index + local_offset_lambertian_queue_count;
-        lambertian_queue_item[queue_index] = gid;
-    }
+    uint item_index = index_at_local + local_queue_offsets[enqueue_index];
+    global_queue_items[enqueue_index][item_index] = gid;
 }
 #endif

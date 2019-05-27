@@ -43,7 +43,8 @@ float3 sample_envmap(__read_only image2d_t envmap, float3 rd) {
     float v = theta / pi;
 
     // CLK_FILTER_LINEAR, CLK_ADDRESS_REPEAT
-    const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
+    // const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
+    const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_LINEAR;
     return read_imagef(envmap, s, (float2)(u, v)).xyz;
 }
 

@@ -12,6 +12,7 @@ namespace rt {
 	static const std::string kGeoScopeKey = "GeoScope";
 
 	static const int kMaterialType_Lambertian = 0;
+	static const int kMaterialType_Specular   = 1;
 
 	struct Material {
 		int material_type = 0;
@@ -31,6 +32,12 @@ namespace rt {
 		//std::array<glm::vec3, 3> Nv;
 		//int ShadingNormal = 0;
 	};
+	class Specular {
+	public:
+		Specular() { }
+	};
+	// static_assert(sizeof(Specular) == 1, "aaa");
+
 	RTTR_REGISTRATION
 	{
 		using namespace rttr;
@@ -42,5 +49,8 @@ namespace rt {
 		.property("BackEmission", &Lambertian::BackEmission)(metadata(kGeoScopeKey, GeoScope::Primitives));
 		//.property("N", &LambertianBRDF::Nv)(metadata(kGeoScopeKey, GeoScope::Vertices))
 		//.property("ShadingNormal", &LambertianBRDF::ShadingNormal)(metadata(kGeoScopeKey, GeoScope::Primitives));
+
+		registration::class_<Specular>("Specular")
+		.constructor<>();
 	}
 }

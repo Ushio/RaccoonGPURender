@@ -328,6 +328,27 @@ namespace rt {
 		WorkerThread _worker;
 	};
 
+	class StageQueue {
+	public:
+		StageQueue(cl_context context, int size) {
+			uint32_t kZero = 0;
+			_item = unique(new OpenCLBuffer<uint32_t>(context, size, OpenCLKernelBufferMode::ReadWrite));
+			_count = unique(new OpenCLBuffer<uint32_t>(context, &kZero, 1, OpenCLKernelBufferMode::ReadWrite));
+		}
+		cl_mem item() const {
+			return _item->memory();
+		}
+		cl_mem count() const {
+			return _count->memory();
+		}
+		void clear(cl_command_queue queue) {
+			_count->fill(0, queue);
+		}
+	private:
+		std::unique_ptr<OpenCLBuffer<uint32_t>> _item;
+		std::unique_ptr<OpenCLBuffer<uint32_t>> _count;
+	};
+
 	class WavefrontLane {
 	public:
 		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager, int wavefrontPathCount)
@@ -355,8 +376,9 @@ namespace rt {
 
 			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
 			_kernel_lambertian = unique(new OpenCLKernel("lambertian", program_lambertian.program()));
-			_kernel_finalize_lambertian = unique(new OpenCLKernel("finalize_lambertian", program_lambertian.program()));
-			
+			OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id);
+			_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
+
 			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
 			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
@@ -379,6 +401,7 @@ namespace rt {
 			_queue_new_path_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1, OpenCLKernelBufferMode::ReadWrite));
 			_queue_lambertian_item = unique(new OpenCLBuffer<uint32_t>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1, OpenCLKernelBufferMode::ReadWrite));
+			_queue_delta_material = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
@@ -431,6 +454,7 @@ namespace rt {
 
 			// initialize queue state
 			_queue_lambertian_count->fill(0, _lane.queue);
+			_queue_delta_material->clear(_lane.queue);
 
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), _lane.queue);
@@ -485,7 +509,7 @@ namespace rt {
 				_kernel_envmap_sampling->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
-			{
+			if (_materialBuffer->lambertians->size() != 0) {
 				int arg = 0;
 				_kernel_lambertian->setArgument(arg++, _mem_path->memory());
 				_kernel_lambertian->setArgument(arg++, _mem_random_state->memory());
@@ -504,8 +528,23 @@ namespace rt {
 
 				_kernel_lambertian->launch(_lane.queue, 0, _wavefrontPathCount);
 
-				_kernel_finalize_lambertian->setArgument(0, _queue_lambertian_count->memory());
-				_eventQueue += _kernel_finalize_lambertian->launch(_lane.queue, 0, 1);
+				_queue_lambertian_count->fill(0, _lane.queue);
+			}
+
+			if(_materialBuffer->speculars->size() != 0) {
+				int arg = 0;
+				_kernel_delta_materials->setArgument(arg++, _mem_path->memory());
+				_kernel_delta_materials->setArgument(arg++, _mem_random_state->memory());
+				_kernel_delta_materials->setArgument(arg++, _mem_extension_results->memory());
+				_kernel_delta_materials->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_delta_materials->setArgument(arg++, _queue_delta_material->item());
+				_kernel_delta_materials->setArgument(arg++, _queue_delta_material->count());
+				_kernel_delta_materials->setArgument(arg++, _materialBuffer->materials->memory());
+				_kernel_delta_materials->setArgument(arg++, _materialBuffer->speculars->memory());
+
+				_kernel_delta_materials->launch(_lane.queue, 0, _wavefrontPathCount);
+
+				_queue_delta_material->clear(_lane.queue);
 			}
 
 			{
@@ -528,10 +567,13 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _envmapBuffer->envmap->memory());
 				_kernel_logic->setArgument(arg++, _accum_color->memory());
 				_kernel_logic->setArgument(arg++, _accum_normal->memory());
+				_kernel_logic->setArgument(arg++, _materialBuffer->materials->memory());
 				_kernel_logic->setArgument(arg++, _queue_new_path_item->memory());
 				_kernel_logic->setArgument(arg++, _queue_new_path_count->memory());
 				_kernel_logic->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_logic->setArgument(arg++, _queue_lambertian_count->memory());
+				_kernel_logic->setArgument(arg++, _queue_delta_material->item());
+				_kernel_logic->setArgument(arg++, _queue_delta_material->count());
 				_eventQueue += _kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
@@ -652,7 +694,7 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_envmap_sampling;
 
 		std::unique_ptr<OpenCLKernel> _kernel_lambertian;
-		std::unique_ptr<OpenCLKernel> _kernel_finalize_lambertian;
+		std::unique_ptr<OpenCLKernel> _kernel_delta_materials;
 
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
@@ -682,6 +724,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_new_path_count;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_item;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_count;
+		std::unique_ptr<StageQueue> _queue_delta_material;
 
 		// Accumlation Buffer
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;

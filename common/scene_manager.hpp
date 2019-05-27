@@ -13,11 +13,17 @@ namespace rt {
 	struct MaterialStorage {
 		std::vector<Material> materials;
 		std::vector<Lambertian> lambertians;
-
+		std::vector<Specular>   speculars;
+		
 		void add(const Lambertian &lambertian) {
 			int index = (int)lambertians.size();
 			materials.emplace_back(Material(kMaterialType_Lambertian, index));
 			lambertians.emplace_back(lambertian);
+		}
+		void add(const Specular &specular) {
+			int index = (int)speculars.size();
+			materials.emplace_back(Material(kMaterialType_Specular, index));
+			speculars.emplace_back(specular);
 		}
 	};
 
@@ -96,6 +102,8 @@ namespace rt {
 		
 			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
 				storage->add(*instance.get_value<std::shared_ptr<Lambertian>>());
+			} else if (instance.is_type<std::shared_ptr<Specular>>()) {
+				storage->add(*instance.get_value<std::shared_ptr<Specular>>());
 			}
 		}
 	}
@@ -118,6 +126,7 @@ namespace rt {
 	public:
 		std::unique_ptr<OpenCLBuffer<Material>> materials;
 		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
+		std::unique_ptr<OpenCLBuffer<Specular>>   speculars;
 	};
 
 	struct EnvmapFragment {
@@ -188,7 +197,7 @@ namespace rt {
 					if (auto r = p->points.column_as_string("file")) {
 						_envmapImage = load_image(r->get(i));
 						// _envmapImage->clamp_rgb(0.0f, 10000.0f);
-						// _envmapImage->clamp_rgb(0.0f, 1000.0f);
+						// _envmapImage->clamp_rgb(0.0f, 100.0f);
 						UniformDirectionWeight uniform_weight;
 						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
 					}
@@ -264,6 +273,7 @@ namespace rt {
 			std::unique_ptr<MaterialBuffer> buffer(new MaterialBuffer());
 			buffer->materials = std::unique_ptr<OpenCLBuffer<Material>>(new OpenCLBuffer<Material>(context, _material_storage->materials.data(), _material_storage->materials.size(), OpenCLKernelBufferMode::ReadOnly));
 			buffer->lambertians = std::unique_ptr<OpenCLBuffer<Lambertian>>(new OpenCLBuffer<Lambertian>(context, _material_storage->lambertians.data(), _material_storage->lambertians.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->speculars = std::unique_ptr<OpenCLBuffer<Specular>>(new OpenCLBuffer<Specular>(context, _material_storage->speculars.data(), _material_storage->speculars.size(), OpenCLKernelBufferMode::ReadOnly));
 			return buffer;
 		}
 

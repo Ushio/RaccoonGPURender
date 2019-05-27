@@ -4,7 +4,7 @@
 #include "types.cl"
 #include "atomic.cl"
 #include "envmap_sampling.cl"
-#include "slab.cl"
+#include "peseudo_random.cl"
 
 // TODO: russian roulette
 
@@ -55,13 +55,25 @@ __kernel void logic(
         evalEnv = false;
         newPath = false;
     }
+    float3 curT = wavefrontPath[gid].T;
+    float luminanceT = 0.2126f * curT.x + 0.7152f * curT.y + 0.0722f * curT.z;
 
-    // Long Path 
-    if(10 < logic_i) {
+    // Russian Roulette
+    float continue_probability = 1.0f;
+    if(7 < logic_i) {
+        continue_probability = min(luminanceT, 1.0f);
+    }
+    uint4 state = random_states[gid];
+    float u = random_uniform(&state);
+    random_states[gid] = state;
+    if(u < continue_probability) {
+        wavefrontPath[gid].T /= continue_probability;
+    } else {
         newPath = true;
     }
+
     // No Contribution
-    if(compMax(wavefrontPath[gid].T) < 1.0e-5f) {
+    if(luminanceT < 1.0e-5f) {
         newPath = true;
     }
 
@@ -69,7 +81,7 @@ __kernel void logic(
         // contribution env light
         // float3 emission = (float3)(1.0f);
         // wavefrontPath[gid].L += wavefrontPath[gid].T * emission;
-
+        
         // if miss intersect then rd is old dir, otherwise new direction sampled by material stage
         float3 rd = wavefrontPath[gid].rd;
         float3 emission = sample_envmap(envmap, rd);

@@ -37,6 +37,7 @@ typedef __attribute__ ((aligned(8))) struct {
 
 #define kMaterialType_Lambertian 0
 #define kMaterialType_Specular   1
+#define kMaterialType_Dierectric 2
 
 typedef struct {
     int material_type;
@@ -50,7 +51,11 @@ typedef struct {
 } Lambertian;
 
 typedef struct {
-    
+
 } Specular;
+
+typedef struct {
+
+} Dierectric;
 
 #endif

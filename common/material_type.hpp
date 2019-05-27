@@ -12,7 +12,8 @@ namespace rt {
 	static const std::string kGeoScopeKey = "GeoScope";
 
 	static const int kMaterialType_Lambertian = 0;
-	static const int kMaterialType_Specular   = 1;
+	static const int kMaterialType_Specular = 1;
+	static const int kMaterialType_Dierectric = 2;
 
 	struct Material {
 		int material_type = 0;
@@ -36,7 +37,11 @@ namespace rt {
 	public:
 		Specular() { }
 	};
-	// static_assert(sizeof(Specular) == 1, "aaa");
+
+	class Dierectric {
+	public:
+		Dierectric() { }
+	};
 
 	RTTR_REGISTRATION
 	{
@@ -51,6 +56,9 @@ namespace rt {
 		//.property("ShadingNormal", &LambertianBRDF::ShadingNormal)(metadata(kGeoScopeKey, GeoScope::Primitives));
 
 		registration::class_<Specular>("Specular")
+		.constructor<>();
+
+		registration::class_<Dierectric>("Dierectric")
 		.constructor<>();
 	}
 }

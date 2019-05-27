@@ -14,7 +14,9 @@ namespace rt {
 		std::vector<Material> materials;
 		std::vector<Lambertian> lambertians;
 		std::vector<Specular>   speculars;
+		std::vector<Dierectric> dierectrics;
 		
+		// TODO duplicated cut
 		void add(const Lambertian &lambertian) {
 			int index = (int)lambertians.size();
 			materials.emplace_back(Material(kMaterialType_Lambertian, index));
@@ -24,6 +26,11 @@ namespace rt {
 			int index = (int)speculars.size();
 			materials.emplace_back(Material(kMaterialType_Specular, index));
 			speculars.emplace_back(specular);
+		}
+		void add(const Dierectric &dierectric) {
+			int index = (int)dierectrics.size();
+			materials.emplace_back(Material(kMaterialType_Dierectric, index));
+			dierectrics.emplace_back(dierectric);
 		}
 	};
 
@@ -102,8 +109,15 @@ namespace rt {
 		
 			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
 				storage->add(*instance.get_value<std::shared_ptr<Lambertian>>());
-			} else if (instance.is_type<std::shared_ptr<Specular>>()) {
+			}
+			else if (instance.is_type<std::shared_ptr<Specular>>()) {
 				storage->add(*instance.get_value<std::shared_ptr<Specular>>());
+			}
+			else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
+				storage->add(*instance.get_value<std::shared_ptr<Dierectric>>());
+			}
+			else {
+				RT_ASSERT(0);
 			}
 		}
 	}
@@ -127,6 +141,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<Material>> materials;
 		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
 		std::unique_ptr<OpenCLBuffer<Specular>>   speculars;
+		std::unique_ptr<OpenCLBuffer<Dierectric>> dierectrics;
 	};
 
 	struct EnvmapFragment {
@@ -274,6 +289,7 @@ namespace rt {
 			buffer->materials = std::unique_ptr<OpenCLBuffer<Material>>(new OpenCLBuffer<Material>(context, _material_storage->materials.data(), _material_storage->materials.size(), OpenCLKernelBufferMode::ReadOnly));
 			buffer->lambertians = std::unique_ptr<OpenCLBuffer<Lambertian>>(new OpenCLBuffer<Lambertian>(context, _material_storage->lambertians.data(), _material_storage->lambertians.size(), OpenCLKernelBufferMode::ReadOnly));
 			buffer->speculars = std::unique_ptr<OpenCLBuffer<Specular>>(new OpenCLBuffer<Specular>(context, _material_storage->speculars.data(), _material_storage->speculars.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->dierectrics = std::unique_ptr<OpenCLBuffer<Dierectric>>(new OpenCLBuffer<Dierectric>(context, _material_storage->dierectrics.data(), _material_storage->dierectrics.size(), OpenCLKernelBufferMode::ReadOnly));
 			return buffer;
 		}
 

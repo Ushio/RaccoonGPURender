@@ -131,31 +131,12 @@ namespace rt {
 		EventQueue() {
 
 		}
-		void add(std::shared_ptr<OpenCLEvent> event, std::function<void(void)> on_finished = [](){}) {
+		void add(std::shared_ptr<OpenCLEvent> event) {
 			event->wait();
 
 			Item item;
 			item.event = event;
-			item.on_finished = on_finished;
 			_queue.push(item);
-
-			while(_queue.empty() == false) {
-				auto front = _queue.front();
-
-				// item is already completed.
-				if (front.event->is_completed()) {
-					if (front.on_finished) {
-						front.on_finished();
-					}
-					_queue.pop();
-
-					// process next event
-					continue;
-				} else {
-					// front item is not finished.
-					break;
-				}
-			}
 
 			// when the item buckets filled
 			if (_maxItem < _queue.size()) {
@@ -163,18 +144,22 @@ namespace rt {
 				_queue.pop();
 
 				front.event->wait();
-
-				if (front.on_finished) {
-					front.on_finished();
-				}
 			}
 		}
 		void operator+=(std::shared_ptr<OpenCLEvent> e) {
 			add(e);
 		}
+
+		void wait() {
+			if (_maxItem < _queue.size()) {
+				auto front = _queue.front();
+				_queue.pop();
+				front.event->wait();
+			}
+		}
+
 		struct Item {
 			std::shared_ptr<OpenCLEvent> event;
-			std::function<void(void)> on_finished;
 		};
 		std::queue<Item> _queue;
 		int _maxItem = 3;
@@ -440,6 +425,7 @@ namespace rt {
 			_avg_sample = 0;
 		}
 		~WavefrontLane() {
+			_eventQueue.wait();
 			_worker.wait();
 		}
 

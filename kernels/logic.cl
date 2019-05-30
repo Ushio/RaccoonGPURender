@@ -108,7 +108,7 @@ __kernel void logic(
         atomic_add_global(&normal32accum[pixel_index].r, color.x);
         atomic_add_global(&normal32accum[pixel_index].g, color.y);
         atomic_add_global(&normal32accum[pixel_index].b, color.z);
-        atomic_add_global(&normal32accum[pixel_index].sampleCount, 1.0f);
+        atomic_inc(&normal32accum[pixel_index].sampleCount);
     }
 
     // add contribution
@@ -119,7 +119,7 @@ __kernel void logic(
             atomic_add_global(&rgb32accum[pixel_index].r, L.x);
             atomic_add_global(&rgb32accum[pixel_index].g, L.y);
             atomic_add_global(&rgb32accum[pixel_index].b, L.z);
-            atomic_add_global(&rgb32accum[pixel_index].sampleCount, 1.0f);
+            atomic_inc(&rgb32accum[pixel_index].sampleCount);
         } else {
             // TODO
         }

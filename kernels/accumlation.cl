@@ -16,20 +16,19 @@ __kernel void accumlation_to_intermediate(__global RGB32AccumulationValueType *s
     vstore_half(src[i].r * div, 0, &dst[i].r_divided);
     vstore_half(src[i].g * div, 0, &dst[i].g_divided);
     vstore_half(src[i].b * div, 0, &dst[i].b_divided);
-    vstore_half(src[i].sampleCount, 0, &dst[i].sampleCount);
+    dst[i].sampleCount = (ushort)src[i].sampleCount;
 }
 
 __kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __global RGB16AccumulationValueType *b) {
     size_t i = get_global_id(0);
-    float sa = vload_half(0, &a[i].sampleCount);
-    float sb = vload_half(0, &b[i].sampleCount);
-
-    float sab = sa + sb;
-    if((int)sab == 0) {
+    ushort sa = a[i].sampleCount;
+    ushort sb = b[i].sampleCount;
+    ushort sab = sa + sb;
+    if(sab == 0) {
         vstore_half(0.0f, 0, &a[i].r_divided);
         vstore_half(0.0f, 0, &a[i].g_divided);
         vstore_half(0.0f, 0, &a[i].b_divided);
-        vstore_half(0.0f, 0, &a[i].sampleCount);
+        a[i].sampleCount = 0;
         return;
     }
     float one_over_sab = 1.0f / sab;
@@ -41,7 +40,7 @@ __kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __globa
     vstore_half(r_divided, 0, &a[i].r_divided);
     vstore_half(g_divided, 0, &a[i].g_divided);
     vstore_half(b_divided, 0, &a[i].b_divided);
-    vstore_half(sab, 0, &a[i].sampleCount);
+    a[i].sampleCount = sab;
 }
 
 // float reinhard(float x, float L2) {

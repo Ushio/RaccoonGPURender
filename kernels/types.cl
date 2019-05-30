@@ -25,14 +25,14 @@ typedef __attribute__ ((aligned(16))) struct {
     float r;
     float g;
     float b;
-    float sampleCount;
+    uint sampleCount;
 } RGB32AccumulationValueType;
 
 typedef __attribute__ ((aligned(8))) struct {
     half r_divided;
     half g_divided;
     half b_divided;
-    half sampleCount;
+    ushort sampleCount;
 } RGB16AccumulationValueType;
 
 // TODO 1 からにする

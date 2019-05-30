@@ -88,7 +88,7 @@ namespace rt {
 		float r = 0.0f;
 		float g = 0.0f;
 		float b = 0.0f;
-		float sampleCount = 0.0f;
+		uint32_t sampleCount = 0u;
 	};
 
 	// 8bit compornent RGBA

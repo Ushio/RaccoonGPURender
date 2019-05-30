@@ -131,21 +131,7 @@ __kernel void logic(
     if(newPath) {
         enqueue_index = 0;
     } else {
-        int material_type = materials[hit_primitive_id].material_type;
-        switch(material_type) {
-        case kMaterialType_Lambertian:
-            enqueue_index = 1;
-            break;
-        case kMaterialType_Specular:
-            enqueue_index = 2;
-            break;
-        case kMaterialType_Dierectric:
-            enqueue_index = 3;
-            break;
-        case kMaterialType_Ward:
-            enqueue_index = 4;
-            break;
-        }
+        enqueue_index = materials[hit_primitive_id].material_type;
     }
 
     __global uint *global_queue_items [NUMBER_OF_QUEUE] = {new_path_queue_item,  lambertian_queue_item,  specular_queue_item,  dierectric_queue_item,  ward_queue_item};

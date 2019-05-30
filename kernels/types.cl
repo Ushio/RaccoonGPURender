@@ -35,11 +35,10 @@ typedef __attribute__ ((aligned(8))) struct {
     ushort sampleCount;
 } RGB16AccumulationValueType;
 
-// TODO 1 からにする
-#define kMaterialType_Lambertian 0
-#define kMaterialType_Specular   1
-#define kMaterialType_Dierectric 2
-#define kMaterialType_Ward       3
+#define kMaterialType_Lambertian 1
+#define kMaterialType_Specular   2
+#define kMaterialType_Dierectric 3
+#define kMaterialType_Ward       4
 
 typedef struct {
     int material_type;

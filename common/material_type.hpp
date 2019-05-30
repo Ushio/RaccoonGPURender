@@ -11,10 +11,10 @@ namespace rt {
 	};
 	static const std::string kGeoScopeKey = "GeoScope";
 
-	static const int kMaterialType_Lambertian = 0;
-	static const int kMaterialType_Specular = 1;
-	static const int kMaterialType_Dierectric = 2;
-	static const int kMaterialType_Ward = 3;
+	static const int kMaterialType_Lambertian = 1;
+	static const int kMaterialType_Specular   = 2;
+	static const int kMaterialType_Dierectric = 3;
+	static const int kMaterialType_Ward       = 4;
 
 	struct Material {
 		int material_type = 0;

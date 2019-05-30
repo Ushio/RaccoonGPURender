@@ -139,8 +139,6 @@ namespace rt {
 			item.on_finished = on_finished;
 			_queue.push(item);
 
-			_last_event = event;
-
 			while(_queue.empty() == false) {
 				auto front = _queue.front();
 
@@ -174,16 +172,12 @@ namespace rt {
 		void operator+=(std::shared_ptr<OpenCLEvent> e) {
 			add(e);
 		}
-		std::shared_ptr<OpenCLEvent> last_event() {
-			return _last_event;
-		}
 		struct Item {
 			std::shared_ptr<OpenCLEvent> event;
 			std::function<void(void)> on_finished;
 		};
 		std::queue<Item> _queue;
-		std::shared_ptr<OpenCLEvent> _last_event;
-		int _maxItem = 6;
+		int _maxItem = 3;
 	};
 
 	class WorkerThread {
@@ -295,6 +289,8 @@ namespace rt {
 				// begin touch marker
 				_previous_cpu_task_done_event->enqueue_wait_marker(queue);
 				_previous_cpu_task_done_event = std::shared_ptr<OpenCLCustomEvent>();
+				//cl_int status = clFlush(queue);
+				//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
 			}
 		}
 
@@ -305,6 +301,8 @@ namespace rt {
 			_worker.run([this, touch_event, cpu_task_done_event, queue_data_transfer, on_read_finished]() {
 				touch_event->wait();
 				auto read_event = _buffer->enqueue_read(queue_data_transfer);
+				//cl_int status = clFlush(queue_data_transfer);
+				//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
 				read_event->wait();
 				on_read_finished(_buffer->ptr());
 				cpu_task_done_event->complete();
@@ -498,7 +496,7 @@ namespace rt {
 
 				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
 				_kernel_finalize_new_path->setArgument(1, _queue_new_path_count->memory());
-				_eventQueue += _kernel_finalize_new_path->launch(_lane.queue, 0, 1);
+				_kernel_finalize_new_path->launch(_lane.queue, 0, 1);
 			}
 
 			// Simple Envmap Sampling
@@ -609,7 +607,7 @@ namespace rt {
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_idsCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
-				_eventQueue += _kernel_extension_ray_cast->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_extension_ray_cast->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
 			{
@@ -632,7 +630,7 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _queue_dierectric->count());
 				_kernel_logic->setArgument(arg++, _queue_ward->item());
 				_kernel_logic->setArgument(arg++, _queue_ward->count());
-				_eventQueue += _kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
 			// for previews
@@ -641,12 +639,12 @@ namespace rt {
 
 				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(0, _accum_normal->memory());
 				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(1, _inspect_normal->memory());
-				_eventQueue += _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
+				auto touch_buffer = _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
 
 				auto f = onNormalRecieved;
 				int w = _camera.resolution_x;
 				int h = _camera.resolution_y;
-				_inspect_normal->mark_end_touch_and_schedule_read(_lane.context, _eventQueue.last_event(), _data_transfer0->queue(), [f, w, h](RGBA8ValueType *ptr) {
+				_inspect_normal->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _data_transfer0->queue(), [f, w, h](RGBA8ValueType *ptr) {
 					f(ptr, w, h);
 				});
 			}
@@ -657,14 +655,16 @@ namespace rt {
 			_all_sample_count->fill(0, _lane.queue);
 			_kernel_stat->setArgument(0, _accum_color->memory());
 			_kernel_stat->setArgument(1, _all_sample_count->memory());
-			_eventQueue += _kernel_stat->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
+			auto touch_stat = _kernel_stat->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
 
 			int w = _camera.resolution_x;
 			int h = _camera.resolution_y;
-			_all_sample_count->mark_end_touch_and_schedule_read(_lane.context, _eventQueue.last_event(), _data_transfer0->queue(), [w, h, this](uint32_t *ptr) {
+			_all_sample_count->mark_end_touch_and_schedule_read(_lane.context, touch_stat, _data_transfer0->queue(), [w, h, this](uint32_t *ptr) {
 				uint64_t all_sample_count = (uint64_t)ptr[0] + (uint64_t)ptr[1] * 4294967296llu;
 				_avg_sample = (float)((double)all_sample_count / (w * h));
 			});
+
+			_eventQueue += enqueue_marker(_lane.queue);
 		}
 		std::shared_ptr<OpenCLEvent> create_color_intermediate() {
 			return _kernel_accumlation_to_intermediate->launch(_lane.queue, 0, _accum_color_intermediate->size());

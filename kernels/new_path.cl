@@ -62,9 +62,9 @@ __kernel void new_path(
     shading_results[path_index].T  = (float3)(1.0f);
 }
 
-__kernel void finalize_new_path(__global ulong *next_pixel_index, __global uint *queue_count) {
-    *next_pixel_index += *queue_count;
-    *queue_count = 0;
+__kernel void finalize_new_path(__global ulong *next_pixel_index, __global uint *new_path_queue_count) {
+    *next_pixel_index += *new_path_queue_count;
+    *new_path_queue_count = 0;
 }
 
 #endif

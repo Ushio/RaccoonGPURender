@@ -397,11 +397,8 @@ namespace rt {
 			// envmap
 			_mem_envmap_samples = unique(new OpenCLBuffer<EnvmapSample>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
-			uint32_t kZero32 = 0;
-			_queue_new_path_item = unique(new OpenCLBuffer<uint32_t>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
-			_queue_new_path_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1, OpenCLKernelBufferMode::ReadWrite));
-			_queue_lambertian_item = unique(new OpenCLBuffer<uint32_t>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
-			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1, OpenCLKernelBufferMode::ReadWrite));
+			_queue_new_path = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_lambertian = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_specular = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_dierectric = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_ward = unique(new StageQueue(lane.context, _wavefrontPathCount));
@@ -451,12 +448,12 @@ namespace rt {
 			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
 			_kernel_random_initialize->launch(_lane.queue, 0, _wavefrontPathCount);
 
-			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path_item->memory());
-			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path_count->memory());
+			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path->item());
+			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path->count());
 			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
 
 			// initialize queue state
-			_queue_lambertian_count->fill(0, _lane.queue);
+			_queue_lambertian->clear(_lane.queue);
 			_queue_specular->clear(_lane.queue);
 			_queue_dierectric->clear(_lane.queue);
 			_queue_ward->clear(_lane.queue);
@@ -485,8 +482,8 @@ namespace rt {
 
 			{
 				int arg = 0;
-				_kernel_new_path->setArgument(arg++, _queue_new_path_item->memory());
-				_kernel_new_path->setArgument(arg++, _queue_new_path_count->memory());
+				_kernel_new_path->setArgument(arg++, _queue_new_path->item());
+				_kernel_new_path->setArgument(arg++, _queue_new_path->count());
 				_kernel_new_path->setArgument(arg++, _mem_path->memory());
 				_kernel_new_path->setArgument(arg++, _mem_shading_results->memory());
 				_kernel_new_path->setArgument(arg++, _mem_random_state->memory());
@@ -495,7 +492,7 @@ namespace rt {
 				_kernel_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
 
 				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
-				_kernel_finalize_new_path->setArgument(1, _queue_new_path_count->memory());
+				_kernel_finalize_new_path->setArgument(1, _queue_new_path->count());
 				_kernel_finalize_new_path->launch(_lane.queue, 0, 1);
 			}
 
@@ -505,8 +502,8 @@ namespace rt {
 				_kernel_envmap_sampling->setArgument(arg++, _mem_path->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _mem_random_state->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _mem_extension_results->memory());
-				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_item->memory());
-				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_count->memory());
+				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian->item());
+				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian->count());
 				_kernel_envmap_sampling->setArgument(arg++, _queue_ward->item());
 				_kernel_envmap_sampling->setArgument(arg++, _queue_ward->count());
 				_kernel_envmap_sampling->setArgument(arg++, _mem_envmap_samples->memory());
@@ -532,8 +529,8 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _mem_random_state->memory());
 				_kernel_lambertian->setArgument(arg++, _mem_extension_results->memory());
 				_kernel_lambertian->setArgument(arg++, _mem_shading_results->memory());
-				_kernel_lambertian->setArgument(arg++, _queue_lambertian_item->memory());
-				_kernel_lambertian->setArgument(arg++, _queue_lambertian_count->memory());
+				_kernel_lambertian->setArgument(arg++, _queue_lambertian->item());
+				_kernel_lambertian->setArgument(arg++, _queue_lambertian->count());
 				_kernel_lambertian->setArgument(arg++, _materialBuffer->materials->memory());
 				_kernel_lambertian->setArgument(arg++, _materialBuffer->lambertians->memory());
 
@@ -550,7 +547,7 @@ namespace rt {
 
 				_kernel_lambertian->launch(_lane.queue, 0, _wavefrontPathCount);
 
-				_queue_lambertian_count->fill(0, _lane.queue);
+				_queue_lambertian->clear(_lane.queue);
 			}
 			if (_materialBuffer->wards->size() != 0) {
 				int arg = 0;
@@ -620,10 +617,10 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _accum_color->memory());
 				_kernel_logic->setArgument(arg++, _accum_normal->memory());
 				_kernel_logic->setArgument(arg++, _materialBuffer->materials->memory());
-				_kernel_logic->setArgument(arg++, _queue_new_path_item->memory());
-				_kernel_logic->setArgument(arg++, _queue_new_path_count->memory());
-				_kernel_logic->setArgument(arg++, _queue_lambertian_item->memory());
-				_kernel_logic->setArgument(arg++, _queue_lambertian_count->memory());
+				_kernel_logic->setArgument(arg++, _queue_new_path->item());
+				_kernel_logic->setArgument(arg++, _queue_new_path->count());
+				_kernel_logic->setArgument(arg++, _queue_lambertian->item());
+				_kernel_logic->setArgument(arg++, _queue_lambertian->count());
 				_kernel_logic->setArgument(arg++, _queue_specular->item());
 				_kernel_logic->setArgument(arg++, _queue_specular->count());
 				_kernel_logic->setArgument(arg++, _queue_dierectric->item());
@@ -779,10 +776,8 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<EnvmapSample>> _mem_envmap_samples;
 
 		// queues
-		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_new_path_item;
-		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_new_path_count;
-		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_item;
-		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_count;
+		std::unique_ptr<StageQueue> _queue_new_path;
+		std::unique_ptr<StageQueue> _queue_lambertian;
 		std::unique_ptr<StageQueue> _queue_specular;
 		std::unique_ptr<StageQueue> _queue_dierectric;
 		std::unique_ptr<StageQueue> _queue_ward;

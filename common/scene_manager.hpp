@@ -10,12 +10,15 @@
 #include "envmap.hpp"
 #include "stopwatch.hpp"
 
+#define USE_WHITE_FURNANCE_ENV 0
+
 namespace rt {
 	struct MaterialStorage {
 		std::vector<Material> materials;
 		std::vector<Lambertian> lambertians;
 		std::vector<Specular>   speculars;
 		std::vector<Dierectric> dierectrics;
+		std::vector<Ward>       wards;
 		
 		void add_variant(const rttr::variant &instance) {
 			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
@@ -26,6 +29,9 @@ namespace rt {
 			}
 			else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
 				add(*instance.get_value<std::shared_ptr<Dierectric>>());
+			}
+			else if (instance.is_type<std::shared_ptr<Ward>>()) {
+				add(*instance.get_value<std::shared_ptr<Ward>>());
 			}
 			else {
 				RT_ASSERT(0);
@@ -45,6 +51,11 @@ namespace rt {
 			int index = (int)dierectrics.size();
 			materials.emplace_back(Material(kMaterialType_Dierectric, index));
 			dierectrics.emplace_back(dierectric);
+		}
+		void add(const Ward &ward) {
+			int index = (int)wards.size();
+			materials.emplace_back(Material(kMaterialType_Ward, index));
+			wards.emplace_back(ward);
 		}
 	};
 
@@ -144,6 +155,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
 		std::unique_ptr<OpenCLBuffer<Specular>>   speculars;
 		std::unique_ptr<OpenCLBuffer<Dierectric>> dierectrics;
+		std::unique_ptr<OpenCLBuffer<Ward>>       wards;
 	};
 
 	struct EnvmapFragment {
@@ -214,10 +226,29 @@ namespace rt {
 			}
 			for (int i = 0; i < point_type->rowCount(); ++i) {
 				if (point_type->get(i) == "ImageEnvmap") {
+					std::string filename;
+					float clamp_max = std::numeric_limits<float>::max();
 					if (auto r = p->points.column_as_string("file")) {
-						_envmapImage = load_image(r->get(i));
+						filename = r->get(i);
+					}
+					if (auto r = p->points.column_as_float("clamp")) {
+						clamp_max = r->get(i);
+					}
+					if (filename.empty() == false) {
+#if USE_WHITE_FURNANCE_ENV
+						auto image = std::shared_ptr<Image2D>(new Image2D());
+						image->resize(2, 2);
+						(*image)(0, 0) = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+						(*image)(1, 0) = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+						(*image)(0, 1) = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+						(*image)(1, 1) = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);
+						_envmapImage = image;
+#else
+						_envmapImage = load_image(filename);
+#endif
 						// _envmapImage->clamp_rgb(0.0f, 10000.0f);
-						// _envmapImage->clamp_rgb(0.0f, 100.0f);
+						_envmapImage->clamp_rgb(0.0f, clamp_max);
+
 						UniformDirectionWeight uniform_weight;
 						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
 						_sixAxisImageEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XPlus)));
@@ -311,6 +342,7 @@ namespace rt {
 			buffer->lambertians = createBufferSafe(context, _material_storage->lambertians.data(), _material_storage->lambertians.size());
 			buffer->speculars = createBufferSafe(context, _material_storage->speculars.data(), _material_storage->speculars.size());
 			buffer->dierectrics = createBufferSafe(context, _material_storage->dierectrics.data(), _material_storage->dierectrics.size());
+			buffer->wards = createBufferSafe(context, _material_storage->wards.data(), _material_storage->wards.size());
 			return buffer;
 		}
 

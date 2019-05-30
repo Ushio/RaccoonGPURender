@@ -14,6 +14,7 @@ namespace rt {
 	static const int kMaterialType_Lambertian = 0;
 	static const int kMaterialType_Specular = 1;
 	static const int kMaterialType_Dierectric = 2;
+	static const int kMaterialType_Ward = 3;
 
 	struct Material {
 		int material_type = 0;
@@ -43,6 +44,12 @@ namespace rt {
 		Dierectric() { }
 	};
 
+	class Ward {
+	public:
+		Ward() { }
+		float alpha = 0.1f;
+	};
+
 	RTTR_REGISTRATION
 	{
 		using namespace rttr;
@@ -60,5 +67,9 @@ namespace rt {
 
 		registration::class_<Dierectric>("Dierectric")
 		.constructor<>();
+
+		registration::class_<Ward>("Ward")
+		.constructor<>()
+		.property("alpha", &Ward::alpha)(metadata(kGeoScopeKey, GeoScope::Primitives));
 	}
 }

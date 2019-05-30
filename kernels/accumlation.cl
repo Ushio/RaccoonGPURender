@@ -66,7 +66,8 @@ __kernel void tonemap(__global RGB16AccumulationValueType *rgb16, __global uchar
     float r = vload_half(0, &rgb16[i].r_divided);
     float g = vload_half(0, &rgb16[i].g_divided);
     float b = vload_half(0, &rgb16[i].b_divided);
-    const float scale = 0.5f;
+    // const float scale = 0.5f;
+    const float scale = 1.0f;
     rgba8[i].x = (uchar)clamp((int)(pow(r * scale, 1.0f / 2.2f) * 256.0f), 0, 255);
     rgba8[i].y = (uchar)clamp((int)(pow(g * scale, 1.0f / 2.2f) * 256.0f), 0, 255);
     rgba8[i].z = (uchar)clamp((int)(pow(b * scale, 1.0f / 2.2f) * 256.0f), 0, 255);

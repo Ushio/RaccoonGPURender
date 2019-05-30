@@ -1,7 +1,7 @@
 ﻿#pragma once
 
 #include <tbb/tbb.h>
-
+#include <atomic>
 #include "peseudo_random.hpp"
 #include "material.hpp"
 #include "scene.hpp"
@@ -361,26 +361,26 @@ namespace rt {
 				bool backside = glm::dot(wo, shadingPoint.Ng) < 0.0f;
 
 				// Explicit Connection To Envmap
-				if(true) {
-					float sampledPDF;
-					auto env = scene->envmap();
-					glm::vec3 light_wi = env->sample(random, shadingPoint.Ng, &sampledPDF);
+				//if(true) {
+				//	float sampledPDF;
+				//	auto env = scene->envmap();
+				//	glm::vec3 light_wi = env->sample(random, shadingPoint.Ng, &sampledPDF);
 
-					if (env->pdf(light_wi, shadingPoint.Ng) != sampledPDF) {
-						radiance_stat::instance().pdf_mismatch++;
-					}
-					else {
-						radiance_stat::instance().pdf_match++;
-					}
+				//	if (env->pdf(light_wi, shadingPoint.Ng) != sampledPDF) {
+				//		radiance_stat::instance().pdf_mismatch++;
+				//	}
+				//	else {
+				//		radiance_stat::instance().pdf_match++;
+				//	}
 
-					float absCosTheta = glm::abs(glm::dot(shadingPoint.Ng, light_wi));
-					ShadingPoint ls;
-					float ltmin = std::numeric_limits<float>::max();
-					if (scene->intersect(p + 1.0e-4f * light_wi / absCosTheta, light_wi, &ls, &ltmin) == false) {
-						glm::vec3 contribution = env->radiance(light_wi) * T * shadingPoint.bxdf->bxdf(wo, light_wi, shadingPoint) * absCosTheta / (float)env->pdf(light_wi, shadingPoint.Ng);
-						Lo += contribution;
-					}
-				}
+				//	float absCosTheta = glm::abs(glm::dot(shadingPoint.Ng, light_wi));
+				//	ShadingPoint ls;
+				//	float ltmin = std::numeric_limits<float>::max();
+				//	if (scene->intersect(p + 1.0e-4f * light_wi / absCosTheta, light_wi, &ls, &ltmin) == false) {
+				//		glm::vec3 contribution = env->radiance(light_wi) * T * shadingPoint.bxdf->bxdf(wo, light_wi, shadingPoint) * absCosTheta / (float)env->pdf(light_wi, shadingPoint.Ng);
+				//		Lo += contribution;
+				//	}
+				//}
 
 				// ここはもっと改良したい
 				//static thread_local LuminaireSampler directSampler;
@@ -444,14 +444,14 @@ namespace rt {
 				rd = wi;
 			}
 			else {
-				//auto env = scene->envmap();
-				//glm::vec3 contribution = env->radiance(rd) * T;
-				//Lo += contribution;
-				if (i == 0) {
-					auto env = scene->envmap();
-					glm::vec3 contribution = env->radiance(rd) * T;
-					Lo += contribution;
-				}
+				auto env = scene->envmap();
+				glm::vec3 contribution = env->radiance(rd) * T;
+				Lo += contribution;
+				//if (i == 0) {
+				//	auto env = scene->envmap();
+				//	glm::vec3 contribution = env->radiance(rd) * T;
+				//	Lo += contribution;
+				//}
 				break;
 			}
 		}

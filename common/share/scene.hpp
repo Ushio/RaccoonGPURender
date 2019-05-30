@@ -1,5 +1,7 @@
 ﻿#pragma once
 #include <embree3/rtcore.h>
+
+#include "houdini_alembic.hpp"
 #include "material.hpp"
 #include "assertion.hpp"
 #include "plane_equation.hpp"
@@ -233,12 +235,13 @@ namespace rt {
 						
 						auto texture = std::shared_ptr<Image2D>(new Image2D());
 						texture->load(absFilePath.string().c_str());
-						texture->clamp_rgb(0.0f, 10000.0f);
+						// texture->clamp_rgb(0.0f, 10000.0f);
+						texture->clamp_rgb(0.0f, 1000.0f);
 
 
-						UniformDirectionWeight uniform_weight;
-						_environmentMap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, uniform_weight));
-						// _environmentMap = std::shared_ptr<SixAxisImageEnvmap>(new SixAxisImageEnvmap(texture));
+						// UniformDirectionWeight uniform_weight;
+						// _environmentMap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(texture, uniform_weight));
+						_environmentMap = std::shared_ptr<SixAxisImageEnvmap>(new SixAxisImageEnvmap(texture));
 					}
 				}
 			}

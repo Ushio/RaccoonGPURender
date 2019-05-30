@@ -130,6 +130,9 @@ __kernel void envmap_sampling(
     __global const ExtensionResult *extension_results,
     __global const uint *lambertian_queue_item, 
     __global const uint *lambertian_queue_count,
+    __global const uint *ward_queue_item, 
+    __global const uint *ward_queue_count,
+
     __global EnvmapSample *envmap_samples,
     __global const EnvmapFragment *fragments,
     __global const float *pdfs,
@@ -151,8 +154,14 @@ __kernel void envmap_sampling(
     uint aliasBucketsCount) {
     uint i = get_global_id(0);
 
-    if(i < *lambertian_queue_count) {
-        uint index = lambertian_queue_item[i];
+    __global const uint *queue_items[2] = {lambertian_queue_item, ward_queue_item};
+    __global const uint *queue_counts[2] = {lambertian_queue_count, ward_queue_count};
+
+    for(int qi = 0 ; qi < 2 ; ++qi) {
+        if(*queue_counts[qi] <= i) {
+            continue;
+        }
+        uint index = queue_items[qi][i];
         uint4 state = random_states[index];
 
 #if SIX_AXIS_SAMPLING

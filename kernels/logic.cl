@@ -40,7 +40,9 @@ __kernel void logic(
     __global uint *specular_queue_item, 
     __global uint *specular_queue_count,
     __global uint *dierectric_queue_item, 
-    __global uint *dierectric_queue_count) {
+    __global uint *dierectric_queue_count,
+    __global uint *ward_queue_item, 
+    __global uint *ward_queue_count) {
     
     uint gid = get_global_id(0);
     uint logic_i = wavefrontPath[gid].logic_i++;
@@ -123,7 +125,7 @@ __kernel void logic(
         }
     }
 
-#define NUMBER_OF_QUEUE 4
+#define NUMBER_OF_QUEUE 5
 
     uint enqueue_index;
     if(newPath) {
@@ -140,11 +142,14 @@ __kernel void logic(
         case kMaterialType_Dierectric:
             enqueue_index = 3;
             break;
+        case kMaterialType_Ward:
+            enqueue_index = 4;
+            break;
         }
     }
 
-    __global uint *global_queue_items [NUMBER_OF_QUEUE] = {new_path_queue_item,  lambertian_queue_item,  specular_queue_item,  dierectric_queue_item};
-    __global uint *global_queue_counts[NUMBER_OF_QUEUE] = {new_path_queue_count, lambertian_queue_count, specular_queue_count, dierectric_queue_count};
+    __global uint *global_queue_items [NUMBER_OF_QUEUE] = {new_path_queue_item,  lambertian_queue_item,  specular_queue_item,  dierectric_queue_item,  ward_queue_item};
+    __global uint *global_queue_counts[NUMBER_OF_QUEUE] = {new_path_queue_count, lambertian_queue_count, specular_queue_count, dierectric_queue_count, ward_queue_count};
 
     // add queue process (naive) 
     // uint item_index = atomic_inc(global_queue_counts[enqueue_index]);

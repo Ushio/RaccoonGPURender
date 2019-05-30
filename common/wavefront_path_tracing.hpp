@@ -379,6 +379,9 @@ namespace rt {
 			OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id);
 			_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
 
+			OpenCLProgram program_ward("ward.cl", lane.context, lane.device_id);
+			_kernel_ward = unique(new OpenCLKernel("ward", program_ward.program()));
+
 			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
 			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
@@ -403,6 +406,7 @@ namespace rt {
 			_queue_lambertian_count = unique(new OpenCLBuffer<uint32_t>(lane.context, &kZero32, 1, OpenCLKernelBufferMode::ReadWrite));
 			_queue_specular = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_dierectric = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_ward = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
@@ -457,6 +461,7 @@ namespace rt {
 			_queue_lambertian_count->fill(0, _lane.queue);
 			_queue_specular->clear(_lane.queue);
 			_queue_dierectric->clear(_lane.queue);
+			_queue_ward->clear(_lane.queue);
 
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), _lane.queue);
@@ -504,6 +509,8 @@ namespace rt {
 				_kernel_envmap_sampling->setArgument(arg++, _mem_extension_results->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_item->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _queue_lambertian_count->memory());
+				_kernel_envmap_sampling->setArgument(arg++, _queue_ward->item());
+				_kernel_envmap_sampling->setArgument(arg++, _queue_ward->count());
 				_kernel_envmap_sampling->setArgument(arg++, _mem_envmap_samples->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->pdfs->memory());
@@ -546,6 +553,32 @@ namespace rt {
 				_kernel_lambertian->launch(_lane.queue, 0, _wavefrontPathCount);
 
 				_queue_lambertian_count->fill(0, _lane.queue);
+			}
+			if (_materialBuffer->wards->size() != 0) {
+				int arg = 0;
+				_kernel_ward->setArgument(arg++, _mem_path->memory());
+				_kernel_ward->setArgument(arg++, _mem_random_state->memory());
+				_kernel_ward->setArgument(arg++, _mem_extension_results->memory());
+				_kernel_ward->setArgument(arg++, _mem_shading_results->memory());
+				_kernel_ward->setArgument(arg++, _queue_ward->item());
+				_kernel_ward->setArgument(arg++, _queue_ward->count());
+				_kernel_ward->setArgument(arg++, _materialBuffer->materials->memory());
+				_kernel_ward->setArgument(arg++, _materialBuffer->wards->memory());
+
+				// envmap simple
+				_kernel_ward->setArgument(arg++, _mem_envmap_samples->memory());
+				_kernel_ward->setArgument(arg++, _envmapBuffer->pdfs->memory());
+
+				for (int axis = 0; axis < 6; ++axis) {
+					_kernel_ward->setArgument(arg++, _envmapBuffer->sixAxisPdfs[axis]->memory());
+				}
+
+				_kernel_ward->setArgument(arg++, _envmapBuffer->envmap->width());
+				_kernel_ward->setArgument(arg++, _envmapBuffer->envmap->height());
+
+				_kernel_ward->launch(_lane.queue, 0, _wavefrontPathCount);
+
+				_queue_ward->clear(_lane.queue);
 			}
 
 			if(_materialBuffer->speculars->size() != 0 && _materialBuffer->dierectrics->size() != 0) {
@@ -597,6 +630,8 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _queue_specular->count());
 				_kernel_logic->setArgument(arg++, _queue_dierectric->item());
 				_kernel_logic->setArgument(arg++, _queue_dierectric->count());
+				_kernel_logic->setArgument(arg++, _queue_ward->item());
+				_kernel_logic->setArgument(arg++, _queue_ward->count());
 				_eventQueue += _kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
 			}
 
@@ -718,6 +753,7 @@ namespace rt {
 
 		std::unique_ptr<OpenCLKernel> _kernel_lambertian;
 		std::unique_ptr<OpenCLKernel> _kernel_delta_materials;
+		std::unique_ptr<OpenCLKernel> _kernel_ward;
 
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
@@ -749,6 +785,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _queue_lambertian_count;
 		std::unique_ptr<StageQueue> _queue_specular;
 		std::unique_ptr<StageQueue> _queue_dierectric;
+		std::unique_ptr<StageQueue> _queue_ward;
 
 		// Accumlation Buffer
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;

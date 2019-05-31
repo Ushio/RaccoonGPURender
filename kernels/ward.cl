@@ -168,13 +168,17 @@ __kernel void ward(
         float3 l_add_v = l + v;
         float3 h = normalize(l_add_v);
 
-        float rho_s = 1.0f;
         float pi = M_PI;
         
         float alpha2 = sqr(ward.alpha);
-        float cosThetaH2 = sqr(dot(h, Ng));
+        float cosThetaH = dot(h, Ng);
+        float cosThetaH2 = sqr(cosThetaH);
         float tanTheta2 = (1.0f - cosThetaH2) / cosThetaH2;
-        float k0 = rho_s / (pi * alpha2);
+
+        // float3 rho = ward.edgetint;
+        float mu = dot(h, wi);
+        float3 rho = mix(ward.reflectance, ward.edgetint, pow(1.0f - mu, 1.0f / ward.falloff));
+        float3 k0 = rho / (pi * alpha2);
         float k1 = exp(-tanTheta2 / alpha2);
         float k2 = dot(l_add_v, l_add_v) / sqrsqr(dot(l_add_v, Ng));
         T = (float3)(k0 * k1 * k2) * cosTheta / pdf;

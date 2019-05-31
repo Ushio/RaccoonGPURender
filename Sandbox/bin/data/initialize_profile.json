@@ -1,0 +1,238 @@
+{
+    "traceEvents": [
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\raccoon_ocl.hpp",
+                "line": 508
+            },
+            "dur": 997187,
+            "name": "Get Platforms",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 1760
+        },
+        {
+            "args": {
+                "desc": "Intel(R) Core(TM) i7-8750H CPU @ 2.20GHz",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\raccoon_ocl.hpp",
+                "line": 609
+            },
+            "dur": 2081,
+            "name": "create context & queue",
+            "ph": "X",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1091991
+        },
+        {
+            "args": {
+                "desc": "Intel(R) UHD Graphics 630",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\raccoon_ocl.hpp",
+                "line": 609
+            },
+            "dur": 4476,
+            "name": "create context & queue",
+            "ph": "X",
+            "pid": 1,
+            "tid": 3,
+            "ts": 1093206
+        },
+        {
+            "args": {
+                "desc": "gfx906",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\raccoon_ocl.hpp",
+                "line": 609
+            },
+            "dur": 411725,
+            "name": "create context & queue",
+            "ph": "X",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1094101
+        },
+        {
+            "args": {
+                "desc": "GeForce RTX 2070 with Max-Q Design",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\raccoon_ocl.hpp",
+                "line": 609
+            },
+            "dur": 1567944,
+            "name": "create context & queue",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 1089549
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\raccoon_ocl.hpp",
+                "line": 505
+            },
+            "dur": 2655887,
+            "name": "OpenCLContext()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 1746
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\sandbox\\src\\ofapp.cpp",
+                "line": 76
+            },
+            "dur": 1697,
+            "name": "Open Alembic",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 2659724
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\sandbox\\src\\ofapp.cpp",
+                "line": 81
+            },
+            "dur": 170898,
+            "name": "Read Alembic Frame",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 2661450
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\scene_manager.hpp",
+                "line": 64
+            },
+            "dur": 25201621,
+            "name": "add_materials()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 3853987
+        },
+        {
+            "args": {
+                "desc": "/dragon",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\scene_manager.hpp",
+                "line": 196
+            },
+            "dur": 26028823,
+            "name": "addPolymesh()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 3026798
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\scene_manager.hpp",
+                "line": 64
+            },
+            "dur": 49801,
+            "name": "add_materials()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 29169935
+        },
+        {
+            "args": {
+                "desc": "/sphere1",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\scene_manager.hpp",
+                "line": 196
+            },
+            "dur": 164085,
+            "name": "addPolymesh()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 29055663
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\wavefront_path_tracing.hpp",
+                "line": 850
+            },
+            "dur": 1876173,
+            "name": "Build BVH",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 29219758
+        },
+        {
+            "args": {
+                "desc": "gfx906",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\wavefront_path_tracing.hpp",
+                "line": 345
+            },
+            "dur": 833306,
+            "name": "Compile Kernel",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 31138186
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\wavefront_path_tracing.hpp",
+                "line": 339
+            },
+            "dur": 1163679,
+            "name": "WavefrontLane()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 31095993
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\wavefront_path_tracing.hpp",
+                "line": 440
+            },
+            "dur": 55,
+            "name": "WavefrontLane::initialize()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 32259684
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\common\\wavefront_path_tracing.hpp",
+                "line": 827
+            },
+            "dur": 29427363,
+            "name": "WavefrontPathTracing()",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 2832394
+        },
+        {
+            "args": {
+                "desc": "",
+                "file": "c:\\users\\ushio\\documents\\raytracing\\of_v0.10.1_vs2017_release\\apps\\raccoongpurender\\sandbox\\src\\ofapp.cpp",
+                "line": 62
+            },
+            "dur": 32262079,
+            "name": "initialize_render",
+            "ph": "X",
+            "pid": 1,
+            "tid": 1,
+            "ts": 69
+        }
+    ]
+}

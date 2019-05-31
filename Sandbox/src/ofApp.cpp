@@ -3,11 +3,12 @@
 #include "raccoon_ocl.hpp"
 #include "peseudo_random.hpp"
 #include "wavefront_path_tracing.hpp"
+#include "timeline_profiler.hpp"
 
 using namespace rt;
 
 OpenCLContext *context_ptr;
-WavefrontPathTracing *pt;
+WavefrontPathTracing *pt = nullptr;
 
 class ImageRecieverForOF {
 public:
@@ -53,20 +54,31 @@ void ofApp::setup() {
 
 	_camera_model.load("../../../scenes/camera_model.ply");
 
+	_osc.setup(8000);
+
+	initialize_render();
+}
+void ofApp::initialize_render() {
+	BEG_PROFILE("initialize_render");
+
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
 
 	context_ptr = new OpenCLContext();
+
 	RT_ASSERT(0 < context_ptr->deviceCount());
 
 	std::string abcPath = ofToDataPath("../../../scenes/wavefront_scene.abc", true);
 	houdini_alembic::AlembicStorage storage;
 	std::string error_message;
-	storage.open(abcPath, error_message);
+	{
+		SCOPED_PROFILE("Open Alembic");
+		storage.open(abcPath, error_message);
+	}
 
 	if (storage.isOpened()) {
-		std::string error_message;
+		SCOPED_PROFILE("Read Alembic Frame");
 		_alembicscene = storage.read(0, error_message);
 	}
 	if (error_message.empty() == false) {
@@ -75,6 +87,21 @@ void ofApp::setup() {
 
 	std::filesystem::path abcDirectory(abcPath);
 	abcDirectory.remove_filename();
+
+	//for (int i = 0; i < 5; ++i) {
+	//	printf("%d\n", i);
+	//	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory);
+	//	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
+	//		colorReciever.setImageAtomic(p, w, h);
+	//	};
+	//	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
+	//	//	normalReciever.setImageAtomic(p, w, h);
+	//	//};
+	//	pt->launch();
+	//	// Sleep(2000);
+	//	delete pt;
+	//}
+
 	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory);
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
@@ -83,9 +110,10 @@ void ofApp::setup() {
 	//	normalReciever.setImageAtomic(p, w, h);
 	//};
 	pt->launch();
-	// pt->launch_fixed(2);
 
-	_osc.setup(8000);
+	END_PROFILE();
+	SAVE_PROFILE(ofToDataPath("initialize_profile.json").c_str());
+	CLEAR_PROFILE();
 }
 void ofApp::exit() {
 	delete pt;
@@ -133,6 +161,7 @@ void ofApp::update() {
 
 //--------------------------------------------------------------
 void ofApp::draw() {
+
 	static bool show_scene_preview = true;
 	static int frame = 0;
 

@@ -336,9 +336,14 @@ namespace rt {
 	public:
 		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager, int wavefrontPathCount)
 			:_lane(lane), _camera(*camera), _wavefrontPathCount(wavefrontPathCount) {
+			SCOPED_PROFILE("WavefrontLane()");
+
 			_data_transfer0 = unique(new OpenCLQueue(lane.context, lane.device_id));
 			_data_transfer1 = unique(new OpenCLQueue(lane.context, lane.device_id));
 			_worker_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
+
+			BEG_PROFILE("Compile Kernel");
+			SET_PROFILE_DESC(lane.device_name.c_str());
 
 			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
 			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
@@ -368,6 +373,8 @@ namespace rt {
 			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
 			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
+
+			END_PROFILE();
 
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -430,6 +437,8 @@ namespace rt {
 		}
 
 		void initialize(int lane_index) {
+			SCOPED_PROFILE("WavefrontLane::initialize()");
+
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
 			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
 			_kernel_random_initialize->launch(_lane.queue, 0, _wavefrontPathCount);
@@ -452,6 +461,9 @@ namespace rt {
 		}
 
 		void step() {
+			// rmt_ScopedCPUSample(step, RMTSF_Aggregate);
+
+			// OPTICK_FRAME("MainThread");
 			{
 				std::lock_guard <std::mutex> lock(_restart_mutex);
 				if (_restart_bang) {
@@ -812,6 +824,7 @@ namespace rt {
 		WavefrontPathTracing(OpenCLContext *context, std::shared_ptr<houdini_alembic::AlembicScene> scene, std::filesystem::path alembicDirectory)
 			:_context(context)
 			,_scene(scene) {
+			SCOPED_PROFILE("WavefrontPathTracing()");
 
 			_sceneManager.setAlembicDirectory(alembicDirectory);
 
@@ -834,7 +847,9 @@ namespace rt {
 			}
 			RT_ASSERT(_camera);
 
+			BEG_PROFILE("Build BVH");
 			_sceneManager.buildBVH();
+			END_PROFILE();
 
 			// ALL Device
 			//for (int i = 0; i < context->deviceCount(); ++i) {

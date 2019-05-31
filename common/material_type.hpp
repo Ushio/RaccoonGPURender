@@ -48,6 +48,9 @@ namespace rt {
 	public:
 		Ward() { }
 		float alpha = 0.1f;
+		OpenCLFloat3 reflectance = glm::vec3(1.0f);
+		OpenCLFloat3 edgetint    = glm::vec3(1.0f);
+		float falloff = 0.5f;
 	};
 
 	RTTR_REGISTRATION
@@ -70,6 +73,9 @@ namespace rt {
 
 		registration::class_<Ward>("Ward")
 		.constructor<>()
-		.property("alpha", &Ward::alpha)(metadata(kGeoScopeKey, GeoScope::Primitives));
+		.property("alpha", &Ward::alpha)(metadata(kGeoScopeKey, GeoScope::Primitives))
+		.property("reflectance", &Ward::reflectance)(metadata(kGeoScopeKey, GeoScope::Primitives))
+		.property("edgetint", &Ward::edgetint)(metadata(kGeoScopeKey, GeoScope::Primitives))
+		.property("falloff", &Ward::falloff)(metadata(kGeoScopeKey, GeoScope::Primitives));
 	}
 }

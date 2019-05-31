@@ -9,7 +9,14 @@
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
 
+#include <tbb/tbb.h>
+
 #include "assertion.hpp"
+
+#define RACOON_OCL_ENABLE_TIMELINE_PROFILE 1
+#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
+#include "timeline_profiler.hpp"
+#endif
 
 namespace rt {
 	static const uint16_t kHalfZero = glm::packHalf(glm::vec1(0.0f)).x;
@@ -494,6 +501,12 @@ namespace rt {
 			bool has_unified_memory;
 		};
 		OpenCLContext() {
+#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
+			SCOPED_PROFILE("OpenCLContext()");
+#endif
+#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
+			BEG_PROFILE("Get Platforms");
+#endif
 			cl_int status;
 			cl_uint numOfPlatforms;
 			status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
@@ -503,6 +516,10 @@ namespace rt {
 			std::vector<cl_platform_id> platforms(numOfPlatforms);
 			status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformIDs() failed");
+
+#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
+			END_PROFILE();
+#endif
 
 			for (cl_platform_id platform : platforms)
 			{
@@ -575,25 +592,37 @@ namespace rt {
 						}
 					}
 
-					DeviceContext deviceContext;
-					deviceContext.platform_info = platform_info;
-					deviceContext.device_info = device_info;
-					deviceContext.device_id = device_id;
-
-					cl_context context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &status);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateContext() failed");
-					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateContext() failed");
-					deviceContext.context = std::shared_ptr<std::remove_pointer<cl_context>::type>(context, clReleaseContext);
-
-					// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
-					cl_command_queue queue = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &status);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
-					REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
-					deviceContext.queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
-			
-					_deviceContexts.push_back(deviceContext);
+					{
+						DeviceContext deviceContext;
+						deviceContext.platform_info = platform_info;
+						deviceContext.device_info = device_info;
+						deviceContext.device_id = device_id;
+						_deviceContexts.push_back(deviceContext);
+					}
 				}
 			}
+
+			auto this_thread_id = std::this_thread::get_id();
+			tbb::parallel_for(tbb::blocked_range<int>(0, _deviceContexts.size()), [&](const tbb::blocked_range<int> &range) {
+				for (int i = range.begin(); i < range.end(); ++i) {
+#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
+					SCOPED_PROFILE("create context & queue");
+					SET_PROFILE_DESC(_deviceContexts[i].device_info.name.c_str());
+#endif
+					cl_context context = clCreateContext(NULL, 1, &_deviceContexts[i].device_id, NULL, NULL, &status);
+					if (status != CL_SUCCESS) {
+						continue;
+					}
+					_deviceContexts[i].context = std::shared_ptr<std::remove_pointer<cl_context>::type>(context, clReleaseContext);
+
+					// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
+					cl_command_queue queue = clCreateCommandQueue(context, _deviceContexts[i].device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+					if (status != CL_SUCCESS) {
+						continue;
+					}
+					_deviceContexts[i].queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
+				}
+			});
 
 			std::map<std::string, int> priority = {
 				{kPLATFORM_NAME_AMD,    3},

@@ -61,6 +61,9 @@ typedef struct {
 
 typedef struct {
     float alpha;
+    float3 reflectance;
+    float3 edgetint;
+    float falloff;
 } Ward;
 
 #endif

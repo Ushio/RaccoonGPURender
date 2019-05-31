@@ -61,6 +61,8 @@ namespace rt {
 
 	// polymesh
 	inline void add_materials(MaterialStorage *storage, houdini_alembic::PolygonMeshObject *p, const glm::mat3 &xformInverseTransposed) {
+		SCOPED_PROFILE("add_materials()");
+
 		storage->materials.reserve(storage->materials.size() + p->primitives.rowCount());
 
 		auto fallback_material = []() {
@@ -191,6 +193,9 @@ namespace rt {
 		}
 
 		void addPolymesh(houdini_alembic::PolygonMeshObject *p) {
+			SCOPED_PROFILE("addPolymesh()");
+			SET_PROFILE_DESC(p->name.c_str());
+
 			bool isTriangleMesh = std::all_of(p->faceCounts.begin(), p->faceCounts.end(), [](int32_t f) { return f == 3; });
 			if (isTriangleMesh == false) {
 				printf("skipped non-triangle mesh: %s\n", p->name.c_str());

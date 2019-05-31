@@ -369,14 +369,22 @@ namespace rt {
 			return _memory.get();
 		}
 
-		std::shared_ptr<OpenCLEvent> map_readonly(T **value, cl_command_queue queue, cl_event event_for_wait = nullptr) {
+		std::shared_ptr<OpenCLEvent> map_readonly(T **value, cl_command_queue queue) {
 			cl_event map_event;
 			cl_int status;
 
-			cl_event *lists = event_for_wait ? &event_for_wait : nullptr;
-			int listCount = event_for_wait ? 1 : 0;
 
-			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), listCount, lists, &map_event, &status);
+			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &map_event, &status);
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			//status = clFlush(queue);
+			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(map_event));
+		}
+		std::shared_ptr<OpenCLEvent> map_readwrite(T **value, cl_command_queue queue) {
+			cl_event map_event;
+			cl_int status;
+
+			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ | CL_MAP_WRITE, 0, _length * sizeof(T), 0, nullptr, &map_event, &status);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			//status = clFlush(queue);
 			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");

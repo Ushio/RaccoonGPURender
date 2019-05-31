@@ -254,6 +254,8 @@ namespace rt {
 						// _envmapImage->clamp_rgb(0.0f, 10000.0f);
 						_envmapImage->clamp_rgb(0.0f, clamp_max);
 
+						SCOPED_PROFILE("create envmap sampler");
+						SET_PROFILE_DESC(filename.c_str());
 						UniformDirectionWeight uniform_weight;
 						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
 						_sixAxisImageEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XPlus)));

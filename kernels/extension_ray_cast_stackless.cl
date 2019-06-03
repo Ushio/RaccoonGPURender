@@ -85,18 +85,27 @@ bool intersect_bvh(
 				if (L && R) {
 					// both hit find near
 					// Pattern A)
-					// ----> [        ]
-					//       ^ use this
+					//        v hit0
+					// ----> L[         ] 
+					//             R[          ] 
+					//             ^ hit0 
+					// choose L 
+					// 
 					// Pattern B)
-					//  [   ----> ]
-					//            ^ use this
+					//           v hit0
+					//  L[       --> ]
+					//       R[             ]
+					//           ^ hit0 
+					// choose L 
 					uint near_node;
 					uint L_index = nodes[node].link_L;
 					uint R_index = nodes[node].link_R;
 					if(L_hit0 == R_hit0) {
+						// Pattern B)
 						near_node = L_hit1 < R_hit1 ? L_index : R_index;
 					}
 					else {
+						// Pattern A)
 						near_node = L_hit0 < R_hit0 ? L_index : R_index;
 					}
 					node = near_node;

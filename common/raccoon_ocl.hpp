@@ -488,6 +488,10 @@ namespace rt {
 		cl_command_queue queue() {
 			return _queue.get();
 		}
+		void finish() {
+			cl_int status = clFinish(_queue.get());
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFinish() failed");
+		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
 	};
@@ -610,7 +614,6 @@ namespace rt {
 				}
 			}
 
-			auto this_thread_id = std::this_thread::get_id();
 			tbb::parallel_for(tbb::blocked_range<int>(0, _deviceContexts.size()), [&](const tbb::blocked_range<int> &range) {
 				for (int i = range.begin(); i < range.end(); ++i) {
 #if RACOON_OCL_ENABLE_TIMELINE_PROFILE
@@ -642,7 +645,6 @@ namespace rt {
 			});
 		}
 		~OpenCLContext() {
-
 		}
 		OpenCLContext(const OpenCLContext&) = delete;
 		void operator=(const OpenCLContext&) = delete;

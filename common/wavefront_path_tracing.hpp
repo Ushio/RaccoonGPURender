@@ -433,7 +433,12 @@ namespace rt {
 		}
 		~WavefrontLane() {
 			_eventQueue.wait();
-			_worker.wait();
+			
+			clFinish(_lane.queue);
+
+			_data_transfer0->finish();
+			_data_transfer1->finish();
+			_worker_queue->finish();
 		}
 
 		void initialize(int lane_index) {
@@ -799,7 +804,7 @@ namespace rt {
 
 		// for data transfer synchronization
 		// WorkerThread _copy_worker;
-		tbb::task_group _worker;
+		// tbb::task_group _worker;
 
 		// Restart 
 		struct RestartParameter {
@@ -897,6 +902,8 @@ namespace rt {
 			for (int i = 0; i < _workers.size(); ++i) {
 				_workers[i].join();
 			}
+			_workers.clear();
+			_wavefront_lanes.clear();
 		}
 
 		void create_color_image() {

@@ -186,6 +186,17 @@ void ofApp::draw(){
 					glm::vec3 b = evaluate_barycentric(p0, p1, p2, tri.b.x, tri.b.y);
 					glm::vec3 c = evaluate_barycentric(p0, p1, p2, tri.c.x, tri.c.y);
 
+					auto phong = [p0, p1, p2, n0, n1, n2](glm::vec3 q, float u, float v) {
+						glm::vec3 pi_0 = q - glm::dot(q - p0, n0) * n0;
+						glm::vec3 pi_1 = q - glm::dot(q - p1, n1) * n1;
+						glm::vec3 pi_2 = q - glm::dot(q - p2, n2) * n2;
+						return evaluate_barycentric(pi_0, pi_1, pi_2, u, v);
+					};
+
+					a = glm::mix(a, phong(a, tri.a.x, tri.a.y), alpha);
+					b = glm::mix(b, phong(b, tri.b.x, tri.b.y), alpha);
+					c = glm::mix(c, phong(c, tri.c.x, tri.c.y), alpha);
+
 					ofDrawLine(a, b);
 					ofDrawLine(b, c);
 					ofDrawLine(c, a);

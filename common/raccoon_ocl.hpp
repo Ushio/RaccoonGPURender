@@ -26,8 +26,6 @@
 #endif
 
 namespace rt {
-	namespace fs = std::experimental::filesystem;
-
 	static const uint16_t kHalfZero = glm::packHalf(glm::vec1(0.0f)).x;
 	struct alignas(8) OpenCLHalf4 {
 		uint16_t x;
@@ -721,6 +719,7 @@ namespace rt {
 		std::vector<std::string> _includes;
 	};
 
+	namespace rac_fs = std::experimental::filesystem;
 	class OpenCLProgramEnvioronment {
 	public:
 		static OpenCLProgramEnvioronment &instance() {
@@ -733,11 +732,11 @@ namespace rt {
 			_putenv("CUDA_CACHE_DISABLE=1");
 		}
 		void setSourceDirectory(std::string dir) {
-			_directory = fs::absolute(fs::path(dir));
+			_directory = rac_fs::absolute(rac_fs::path(dir));
 			_directory.make_preferred();
 		}
 		void addInclude(std::string dir) {
-			fs::path d = fs::absolute(fs::path(dir));
+			rac_fs::path d = rac_fs::absolute(rac_fs::path(dir));
 			d.make_preferred();
 			_includes.push_back(d.string());
 		}
@@ -746,13 +745,13 @@ namespace rt {
 		}
 		std::string kernelAbsolutePath(const char *kernel_file) const {
 			auto absFilePath = _directory / kernel_file;
-			return fs::absolute(absFilePath).string();
+			return rac_fs::absolute(absFilePath).string();
 		}
 		std::vector<std::string> includes() const {
 			return _includes;
 		}
 	private:
-		fs::path _directory;
+		rac_fs::path _directory;
 		std::vector<std::string> _includes;
 	};
 

@@ -3,7 +3,12 @@
 
 #include "types.cl"
 
-__kernel void accumlation_to_intermediate(__global RGB32AccumulationValueType *src, __global RGB16AccumulationValueType *dst) {
+__kernel void accumlation_to_intermediate(__global RGB32AccumulationValueType *src, __global RGB16AccumulationValueType *dst, __global volatile int *is_holding_mutex) {
+    // failed to acquire the mutex
+    if(*is_holding_mutex == 0) {
+        return;
+    }
+
     size_t i = get_global_id(0);
     float sampleCount = src[i].sampleCount;
     float div = 1.0f / sampleCount;

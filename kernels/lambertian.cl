@@ -110,7 +110,6 @@ __kernel void lambertian(
         wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
 #if SIX_AXIS_SAMPLING
         pdf_envmap = envmap_pdf_sixAxis(wi, Ng, sixAxisPdfs0, sixAxisPdfs1, sixAxisPdfs2, sixAxisPdfs3, sixAxisPdfs4, sixAxisPdfs5, width, height);
-        // pdf_envmap = envmap_pdf(wi, sixAxisPdfs2, width, height);
 #else
         pdf_envmap = envmap_pdf(wi, envmap_pdfs, width, height);
 #endif

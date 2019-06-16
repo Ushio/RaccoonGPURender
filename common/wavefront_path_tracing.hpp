@@ -11,6 +11,7 @@
 #include "houdini_alembic.hpp"
 #include "scene_manager.hpp"
 #include "stopwatch.hpp"
+#include "timeline_profiler.hpp"
 
 namespace rt {
 	static const uint32_t kWavefrontPathCountGPU = 1 << 24; /* 2^24 */

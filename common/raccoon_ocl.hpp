@@ -3,22 +3,31 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <sstream>
 #include <algorithm>
+#include <fstream>
+#include <filesystem>
+
 #include <glm/glm.hpp>
+#include <glm/ext.hpp>
 
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
 
-#include <tbb/tbb.h>
+#include <ppl.h>
 
-#include "assertion.hpp"
+#define USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION 1
 
-#define RACOON_OCL_ENABLE_TIMELINE_PROFILE 1
-#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
-#include "timeline_profiler.hpp"
+#if USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION
+#include <intrin.h>
+#define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); __debugbreak(); }
+#else
+#define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); throw std::runtime_error(buffer); }
 #endif
 
 namespace rt {
+	namespace fs = std::experimental::filesystem;
+
 	static const uint16_t kHalfZero = glm::packHalf(glm::vec1(0.0f)).x;
 	struct alignas(8) OpenCLHalf4 {
 		uint16_t x;
@@ -144,8 +153,6 @@ namespace rt {
 		return status;
 	}
 
-#define REQUIRE_OR_EXCEPTION(status, message) if(status == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); RT_ASSERT(status); throw std::runtime_error(buffer); }
-
 	class OpenCLEvent {
 	public:
 		OpenCLEvent(cl_event e) :_event(e, clReleaseEvent) { }
@@ -155,16 +162,16 @@ namespace rt {
 		double wait() {
 			auto e = _event.get();
 			cl_int status = clWaitForEvents(1, &e);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clWaitForEvents() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clWaitForEvents() failed");
 
 			cl_ulong ev_beg_time_nano = 0;
 			cl_ulong ev_end_time_nano = 0;
 
 			status = clGetEventProfilingInfo(e, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &ev_beg_time_nano, NULL);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
 
 			status = clGetEventProfilingInfo(e, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &ev_end_time_nano, NULL);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clGetEventProfilingInfo() failed");
 
 			cl_ulong delta_time_nano = ev_end_time_nano - ev_beg_time_nano;
 			double delta_ms = delta_time_nano * 0.001 * 0.001;
@@ -173,7 +180,7 @@ namespace rt {
 		cl_int status() const {
 			cl_int s;
 			cl_int r = clGetEventInfo(_event.get(), CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(s), &s, nullptr);
-			REQUIRE_OR_EXCEPTION(r == CL_SUCCESS, "clGetEventInfo() failed");
+			RAC_ASSERT(r == CL_SUCCESS, "clGetEventInfo() failed");
 			return s;
 		}
 		bool is_completed() const {
@@ -186,9 +193,9 @@ namespace rt {
 		void enqueue_wait(cl_command_queue queue) {
 			cl_event e = _event.get();
 			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, nullptr);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueBarrierWithWaitList() failed");
 			//status = clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
@@ -199,7 +206,7 @@ namespace rt {
 		OpenCLCustomEvent(cl_context context) {
 			cl_int status;
 			_custom_event = decltype(_custom_event)(clCreateUserEvent(context, &status), clReleaseEvent);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateUserEvent() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateUserEvent() failed");
 		}
 		OpenCLCustomEvent(const OpenCLCustomEvent &) = delete;
 		void operator=(const OpenCLCustomEvent &) = delete;
@@ -208,14 +215,14 @@ namespace rt {
 			cl_event e = _custom_event.get();
 			cl_event marker_event;
 			cl_int status = clEnqueueMarkerWithWaitList(queue, 1, &e, &marker_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMarkerWithWaitList() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueMarkerWithWaitList() failed");
 			//status = clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(marker_event));
 		}
 		void complete() {
 			cl_int status = clSetUserEventStatus(_custom_event.get(), CL_COMPLETE);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetUserEventStatus() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clSetUserEventStatus() failed");
 		}
 
 	private:
@@ -225,9 +232,9 @@ namespace rt {
 	inline std::shared_ptr<OpenCLEvent> enqueue_marker(cl_command_queue queue) {
 		cl_event marker_event;
 		cl_int status = clEnqueueMarker(queue, &marker_event);
-		REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMarker() failed");
+		RAC_ASSERT(status == CL_SUCCESS, "clEnqueueMarker() failed");
 		//status = clFlush(queue);
-		//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+		//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 		return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(marker_event));
 	}
 	
@@ -281,20 +288,20 @@ namespace rt {
 				map_flags = CL_MAP_WRITE_INVALIDATE_REGION;
 				break;
 			default:
-				RT_ASSERT(0);
+				RAC_ASSERT(0, "");
 			}
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, length * sizeof(T), nullptr, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
-			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
+			RAC_ASSERT(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 
 			_ptr = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, map_flags, 0, _length * sizeof(T), 0, nullptr, nullptr, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueMapBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueMapBuffer() failed");
 		}
 		~OpenCLPinnedBuffer() {
 			cl_int status = clEnqueueUnmapMemObject(_queue, _memory.get(), _ptr, 0, nullptr, nullptr);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
 		}
 		cl_mem memory() const {
 			return _memory.get();
@@ -333,14 +340,14 @@ namespace rt {
 				mem_flags = CL_MEM_WRITE_ONLY;
 				break;
 			default:
-				RT_ASSERT(0);
+				RAC_ASSERT(0, "");
 			}
 
 			// http://wiki.tommy6.net/wiki/clCreateBuffer
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
-			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
+			RAC_ASSERT(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 		}
 		OpenCLBuffer(cl_context context, uint32_t length, OpenCLKernelBufferMode mode)
@@ -355,14 +362,17 @@ namespace rt {
 			case OpenCLKernelBufferMode::ReadOnly:
 				mem_flags = CL_MEM_READ_ONLY;
 				break;
+			case OpenCLKernelBufferMode::WriteOnly:
+				mem_flags = CL_MEM_WRITE_ONLY;
+				break;
 			default:
-				RT_ASSERT(0);
+				RAC_ASSERT(0, "");
 			}
 
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, mem_flags, length * sizeof(T), nullptr, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateBuffer() failed");
-			REQUIRE_OR_EXCEPTION(memory, "clCreateBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
+			RAC_ASSERT(memory, "clCreateBuffer() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 		}
 		cl_mem memory() const {
@@ -375,9 +385,9 @@ namespace rt {
 
 
 			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ, 0, _length * sizeof(T), 0, nullptr, &map_event, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			//status = clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(map_event));
 		}
 		std::shared_ptr<OpenCLEvent> map_readwrite(T **value, cl_command_queue queue) {
@@ -385,14 +395,14 @@ namespace rt {
 			cl_int status;
 
 			(*value) = (T *)clEnqueueMapBuffer(queue, _memory.get(), CL_FALSE /* blocking */, CL_MAP_READ | CL_MAP_WRITE, 0, _length * sizeof(T), 0, nullptr, &map_event, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			//status = clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(map_event));
 		}
 		void unmap(T *value, cl_command_queue queue) {
 			cl_int status = clEnqueueUnmapMemObject(queue, _memory.get(), value, 0, nullptr, nullptr);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueUnmapMemObject() failed");
 		}
 		void read_immediately(T *value, cl_command_queue queue) {
 			T *p_gpu;
@@ -408,24 +418,24 @@ namespace rt {
 		std::shared_ptr<OpenCLEvent> copy_to_host(OpenCLPinnedBuffer<T> *value, cl_command_queue queue, OpenCLEventList wait_events = OpenCLEventList()) {
 			cl_event copy_event;
 			cl_int status = clEnqueueReadBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), wait_events.size(), wait_events.events(), &copy_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			//clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(copy_event));
 		}
 		std::shared_ptr<OpenCLEvent> copy_to_device(OpenCLPinnedBuffer<T> *value, cl_command_queue queue, OpenCLEventList wait_events = OpenCLEventList()) {
 			cl_event copy_event;
 			cl_int status = clEnqueueWriteBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value->ptr(), wait_events.size(), wait_events.events(), &copy_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			//status = clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(copy_event));
 		}
 
 		std::shared_ptr<OpenCLEvent> fill(T value, cl_command_queue queue) {
 			cl_event fill_event;
 			cl_int status = clEnqueueFillBuffer(queue, _memory.get(), &value, sizeof(T), 0, _length * sizeof(T), 0, nullptr, &fill_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueFillBuffer() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueFillBuffer() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(fill_event));
 		}
 
@@ -448,7 +458,7 @@ namespace rt {
 
 			cl_int status;
 			cl_mem memory = clCreateImage(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, &format, &desc, p, &status);
-			RT_ASSERT(status == CL_SUCCESS);
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateImage() failed");
 			_memory = decltype(_memory)(memory, clReleaseMemObject);
 		}
 		cl_mem memory() const {
@@ -481,8 +491,8 @@ namespace rt {
 		OpenCLQueue(cl_context context, cl_device_id device_id) {
 			cl_int status;
 			cl_command_queue queue = clCreateCommandQueue(context, device_id, CL_QUEUE_PROFILING_ENABLE, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateCommandQueue() failed");
-			REQUIRE_OR_EXCEPTION(context != nullptr, "clCreateCommandQueue() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateCommandQueue() failed");
+			RAC_ASSERT(context != nullptr, "clCreateCommandQueue() failed");
 			_queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
 		}
 		cl_command_queue queue() {
@@ -490,11 +500,11 @@ namespace rt {
 		}
 		void finish() {
 			cl_int status = clFinish(_queue.get());
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFinish() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clFinish() failed");
 		}
 		void flush() {
 			cl_int status = clFlush(_queue.get());
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
@@ -517,42 +527,32 @@ namespace rt {
 			bool has_unified_memory;
 		};
 		OpenCLContext() {
-#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
-			SCOPED_PROFILE("OpenCLContext()");
-#endif
-#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
-			BEG_PROFILE("Get Platforms");
-#endif
 			cl_int status;
 			cl_uint numOfPlatforms;
 			status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformIDs() failed");
-			REQUIRE_OR_EXCEPTION(numOfPlatforms != 0, "no available opencl platform");
+			RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
+			RAC_ASSERT(numOfPlatforms != 0, "no available opencl platform");
 
 			std::vector<cl_platform_id> platforms(numOfPlatforms);
 			status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformIDs() failed");
-
-#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
-			END_PROFILE();
-#endif
+			RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
 
 			for (cl_platform_id platform : platforms)
 			{
 				PlatformInfo platform_info;
-				status = opencl_platform_info(platform_info.profile, platform, CL_PLATFORM_PROFILE);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(platform_info.version, platform, CL_PLATFORM_VERSION);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(platform_info.name, platform, CL_PLATFORM_NAME);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(platform_info.vender, platform, CL_PLATFORM_VENDOR);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
-				status = opencl_platform_info(platform_info.extensions, platform, CL_PLATFORM_EXTENSIONS);  REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.profile, platform, CL_PLATFORM_PROFILE);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.version, platform, CL_PLATFORM_VERSION);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.name, platform, CL_PLATFORM_NAME);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.vender, platform, CL_PLATFORM_VENDOR);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
+				status = opencl_platform_info(platform_info.extensions, platform, CL_PLATFORM_EXTENSIONS);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
 
 				cl_uint numOfDevices;
 				status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &numOfDevices);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+				RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceIDs() failed");
 
 				std::vector<cl_device_id> deviceIds(numOfDevices);
 				status = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, numOfDevices, deviceIds.data(), nullptr);
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceIDs() failed");
+				RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceIDs() failed");
 
 				// printf("CL_PLATFORM_NAME: %s\n", platform_info.name.c_str());
 				
@@ -561,25 +561,25 @@ namespace rt {
 
 					DeviceInfo device_info;
 					status = opencl_device_info(device_info.name, device_id, CL_DEVICE_NAME);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 					status = opencl_device_info(device_info.version, device_id, CL_DEVICE_VERSION);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 					status = opencl_device_info(device_info.extensions, device_id, CL_DEVICE_EXTENSIONS);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 
 					cl_device_type device_type;
 					status = clGetDeviceInfo(device_id, CL_DEVICE_TYPE, sizeof(device_type), &device_type, nullptr);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 					device_info.is_gpu = (device_type & CL_DEVICE_TYPE_GPU) != 0;
 
 					cl_bool has_unified_memory;
 					status = clGetDeviceInfo(device_id, CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(has_unified_memory), &has_unified_memory, nullptr);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 					device_info.has_unified_memory = has_unified_memory != 0;
 
 					cl_uint compute_units;
 					status = clGetDeviceInfo(device_id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, nullptr);
-					REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 
 					// CL_DEVICE_PARTITION_EQUALLY
 					if (device_info.is_gpu == false) {
@@ -597,8 +597,8 @@ namespace rt {
 							cl_device_id sub_device_id;
 							cl_uint num_devices;
 							status = clCreateSubDevices(device_id, pertition_properties, sizeof(sub_device_id), &sub_device_id, &num_devices);
-							REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateSubDevices() failed");
-							REQUIRE_OR_EXCEPTION(num_devices == 1, "clCreateSubDevices() failed");
+							RAC_ASSERT(status == CL_SUCCESS, "clCreateSubDevices() failed");
+							RAC_ASSERT(num_devices == 1, "clCreateSubDevices() failed");
 							
 							// override by sub device
 							device_id = sub_device_id;
@@ -617,26 +617,21 @@ namespace rt {
 					}
 				}
 			}
+			concurrency::parallel_for_each(_deviceContexts.begin(), _deviceContexts.end(), [](DeviceContext &deviceContext) {
+				cl_int status;
 
-			tbb::parallel_for(tbb::blocked_range<int>(0, (int)_deviceContexts.size()), [&](const tbb::blocked_range<int> &range) {
-				for (int i = range.begin(); i < range.end(); ++i) {
-#if RACOON_OCL_ENABLE_TIMELINE_PROFILE
-					SCOPED_PROFILE("create context & queue");
-					SET_PROFILE_DESC(_deviceContexts[i].device_info.name.c_str());
-#endif
-					cl_context context = clCreateContext(NULL, 1, &_deviceContexts[i].device_id, NULL, NULL, &status);
-					if (status != CL_SUCCESS) {
-						continue;
-					}
-					_deviceContexts[i].context = std::shared_ptr<std::remove_pointer<cl_context>::type>(context, clReleaseContext);
-
-					// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
-					cl_command_queue queue = clCreateCommandQueue(context, _deviceContexts[i].device_id, CL_QUEUE_PROFILING_ENABLE, &status);
-					if (status != CL_SUCCESS) {
-						continue;
-					}
-					_deviceContexts[i].queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
+				cl_context context = clCreateContext(NULL, 1, &deviceContext.device_id, NULL, NULL, &status);
+				if (status != CL_SUCCESS) {
+					return;
 				}
+				deviceContext.context = std::shared_ptr<std::remove_pointer<cl_context>::type>(context, clReleaseContext);
+
+				// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
+				cl_command_queue queue = clCreateCommandQueue(context, deviceContext.device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+				if (status != CL_SUCCESS) {
+					return;
+				}
+				deviceContext.queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
 			});
 
 			std::map<std::string, int> priority = {
@@ -649,6 +644,7 @@ namespace rt {
 			});
 		}
 		~OpenCLContext() {
+
 		}
 		OpenCLContext(const OpenCLContext&) = delete;
 		void operator=(const OpenCLContext&) = delete;
@@ -657,7 +653,7 @@ namespace rt {
 			return (int)_deviceContexts.size();
 		}
 		OpenCLLane lane(int index) const {
-			RT_ASSERT(0 <= index && index < _deviceContexts.size());
+			RAC_ASSERT(0 <= index && index < _deviceContexts.size(), "lane() out of range");
 			OpenCLLane lane;
 			lane.device_name = _deviceContexts[index].device_info.name;
 			lane.device_id = _deviceContexts[index].device_id;
@@ -668,11 +664,11 @@ namespace rt {
 			return lane;
 		}
 		PlatformInfo platform_info(int index) const {
-			RT_ASSERT(0 <= index && index < _deviceContexts.size());
+			RAC_ASSERT(0 <= index && index < _deviceContexts.size(), "platform_info() out of range");
 			return _deviceContexts[index].platform_info;
 		}
 		DeviceInfo device_info(int index) const {
-			RT_ASSERT(0 <= index && index < _deviceContexts.size());
+			RAC_ASSERT(0 <= index && index < _deviceContexts.size(), "device_info() out of range");
 			return _deviceContexts[index].device_info;
 		}
 	private:
@@ -737,11 +733,11 @@ namespace rt {
 			_putenv("CUDA_CACHE_DISABLE=1");
 		}
 		void setSourceDirectory(std::string dir) {
-			_directory = std::filesystem::absolute(std::filesystem::path(dir));
+			_directory = fs::absolute(fs::path(dir));
 			_directory.make_preferred();
 		}
 		void addInclude(std::string dir) {
-			std::filesystem::path d = std::filesystem::absolute(std::filesystem::path(dir));
+			fs::path d = fs::absolute(fs::path(dir));
 			d.make_preferred();
 			_includes.push_back(d.string());
 		}
@@ -750,13 +746,13 @@ namespace rt {
 		}
 		std::string kernelAbsolutePath(const char *kernel_file) const {
 			auto absFilePath = _directory / kernel_file;
-			return std::filesystem::absolute(absFilePath).string();
+			return fs::absolute(absFilePath).string();
 		}
 		std::vector<std::string> includes() const {
 			return _includes;
 		}
 	private:
-		std::filesystem::path _directory;
+		fs::path _directory;
 		std::vector<std::string> _includes;
 	};
 
@@ -765,14 +761,14 @@ namespace rt {
 		OpenCLKernel(const char *kernel_function, cl_program program) {
 			cl_int status;
 			cl_kernel k = clCreateKernel(program, kernel_function, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateKernel() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateKernel() failed");
 			_kernel = decltype(_kernel)(k, clReleaseKernel);
 		}
 
 		template <class T>
 		void setArgument(int i, const T &value) {
 			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(value), &value);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
 		template <class... Xs>
 		void setArguments(const Xs&... xs) {
@@ -801,9 +797,9 @@ namespace rt {
 				global_work_size  /*global_work_size*/,
 				nullptr           /*local_work_size*/,
 				event_list.size(), event_list.events(), &kernel_event);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
 			//status = clFlush(queue);
-			//REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
 		}
 	private:
@@ -836,8 +832,8 @@ namespace rt {
 
 			cl_int status;
 			cl_program program = clCreateProgramWithSource(_context, sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
-			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clCreateProgramWithSource() failed");
-			REQUIRE_OR_EXCEPTION(program, "clCreateProgramWithSource() failed");
+			RAC_ASSERT(status == CL_SUCCESS, "clCreateProgramWithSource() failed");
+			RAC_ASSERT(program, "clCreateProgramWithSource() failed");
 
 			_program = decltype(_program)(program, clReleaseProgram);
 
@@ -846,10 +842,10 @@ namespace rt {
 				std::string build_log;
 				status = opencl_build_log(build_log, program, _device_id);
 				printf("%s", build_log.c_str());
-				REQUIRE_OR_EXCEPTION(false, build_log.c_str());
+				RAC_ASSERT(false, build_log.c_str());
 			}
 			else if (status != CL_SUCCESS) {
-				REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clBuildProgram() failed");
+				RAC_ASSERT(status == CL_SUCCESS, "clBuildProgram() failed");
 			}
 		}
 	private:

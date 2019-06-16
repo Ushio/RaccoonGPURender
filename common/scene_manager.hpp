@@ -9,6 +9,7 @@
 #include "image2d.hpp"
 #include "envmap.hpp"
 #include "stopwatch.hpp"
+#include "timeline_profiler.hpp"
 
 #define USE_WHITE_FURNANCE_ENV 0
 

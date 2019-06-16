@@ -3,7 +3,7 @@
 
 #include "types.cl"
 
-__kernel void accumlation_to_intermediate(__global RGB32AccumulationValueType *src, __global RGB16AccumulationValueType *dst, __global volatile int *is_holding_mutex) {
+__kernel void accumlation_to_intermediate(__global RGB32AccumulationValueType *src, __global RGB16IntermediateValueType *dst, __global volatile int *is_holding_mutex) {
     // failed to acquire the mutex
     if(*is_holding_mutex == 0) {
         return;
@@ -24,7 +24,7 @@ __kernel void accumlation_to_intermediate(__global RGB32AccumulationValueType *s
     dst[i].sampleCount = (ushort)src[i].sampleCount;
 }
 
-__kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __global RGB16AccumulationValueType *b) {
+__kernel void merge_intermediate(__global RGB16IntermediateValueType *a, __global RGB16IntermediateValueType *b) {
     size_t i = get_global_id(0);
     ushort sa = a[i].sampleCount;
     ushort sb = b[i].sampleCount;
@@ -51,7 +51,7 @@ __kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __globa
 // float reinhard(float x, float L2) {
 //     return x / (1.0f + x) * (1.0f + x / L2);
 // }
-// __kernel void tonemap(__global RGB16AccumulationValueType *rgb16, __global uchar4 *rgba8) {
+// __kernel void tonemap(__global RGB16IntermediateValueType *rgb16, __global uchar4 *rgba8) {
 //     size_t i = get_global_id(0);
 //     float r = vload_half(0, &rgb16[i].r_divided);
 //     float g = vload_half(0, &rgb16[i].g_divided);
@@ -65,7 +65,7 @@ __kernel void merge_intermediate(__global RGB16AccumulationValueType *a, __globa
 //     rgba8[i].w = 255;
 // }
 
-__kernel void tonemap(__global RGB16AccumulationValueType *rgb16, __global uchar4 *rgba8) {
+__kernel void tonemap(__global RGB16IntermediateValueType *rgb16, __global uchar4 *rgba8) {
     size_t i = get_global_id(0);
     float r = vload_half(0, &rgb16[i].r_divided);
     float g = vload_half(0, &rgb16[i].g_divided);

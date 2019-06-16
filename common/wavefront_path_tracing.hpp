@@ -91,6 +91,14 @@ namespace rt {
 		uint32_t sampleCount = 0u;
 	};
 
+	// Intermediate
+	struct alignas(16) RGB16IntermediateValueType {
+		uint16_t r_divided;
+		uint16_t g_divided;
+		uint16_t b_divided;
+		uint16_t sampleCount;
+	};
+
 	// 8bit compornent RGBA
 	struct alignas(4) RGBA8ValueType {
 		uint8_t r;
@@ -338,9 +346,9 @@ namespace rt {
 			:_lane(lane), _camera(*camera), _wavefrontPathCount(wavefrontPathCount) {
 			SCOPED_PROFILE("WavefrontLane()");
 
-			_data_transfer0 = unique(new OpenCLQueue(lane.context, lane.device_id));
-			_data_transfer1 = unique(new OpenCLQueue(lane.context, lane.device_id));
-			_post_processing_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
+			_step_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
+			_step_data_transfer = unique(new OpenCLQueue(lane.context, lane.device_id));
+			_finalize_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
 
 			BEG_PROFILE("Compile Kernel");
 			SET_PROFILE_DESC(lane.device_name.c_str());
@@ -406,21 +414,18 @@ namespace rt {
 			// inspect
 			_inspect_normal = unique(new PeriodicReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
-			_accum_color_intermediate       = unique(new ReadableBuffer<OpenCLHalf4>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
-			_accum_color_intermediate_other = unique(new WritableBuffer<OpenCLHalf4>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+			_accum_color_intermediate_shared = unique(new OpenCLBuffer<RGB16IntermediateValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
+			_accum_color_intermediate       = unique(new ReadableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+			_accum_color_intermediate_other = unique(new WritableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
 			OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id);
 
 			_kernel_accumlation_to_intermediate = unique(new OpenCLKernel("accumlation_to_intermediate", program_accumlation.program()));
 
 			_kernel_merge_intermediate = unique(new OpenCLKernel("merge_intermediate", program_accumlation.program()));
-			_kernel_merge_intermediate->setArgument(0, _accum_color_intermediate->memory());
-			_kernel_merge_intermediate->setArgument(1, _accum_color_intermediate_other->memory());
 
 			_final_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 			_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
-			_kernel_tonemap->setArgument(0, _accum_color_intermediate->memory());
-			_kernel_tonemap->setArgument(1, _final_color->memory());
 
 			_intermediate_mutex = unique(new OpenCLBuffer<int32_t>(lane.context, 1, rt::OpenCLKernelBufferMode::ReadWrite));
 			_is_holding_intermediate_in_step = unique(new OpenCLBuffer<int32_t>(lane.context, 1, rt::OpenCLKernelBufferMode::ReadWrite));
@@ -431,6 +436,7 @@ namespace rt {
 			_kernel_free_mutex_in_step    = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
 			_kernel_acquire_mutex_in_merge = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
 			_kernel_free_mutex_in_merge    = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
+			_kernel_copy_if_locked = unique(new OpenCLKernel("copy_if_locked", program_mutex.program()));
 
 			// Stat
 			_all_sample_count = unique(new PeriodicReadableBuffer<uint32_t>(lane.context, lane.queue, 2));
@@ -442,51 +448,45 @@ namespace rt {
 		~WavefrontLane() {
 			_eventQueue.wait();
 			
-			clFinish(_lane.queue);
-
-			_data_transfer0->finish();
-			_data_transfer1->finish();
-			_post_processing_queue->finish();
+			_step_queue->finish();
+			_step_data_transfer->finish();
+			_finalize_queue->finish();
 		}
 
 		void initialize(int lane_index) {
 			SCOPED_PROFILE("WavefrontLane::initialize()");
 
-			clFinish(_lane.queue);
-			_post_processing_queue->finish();
-			_data_transfer0->finish();
-			_data_transfer1->finish();
+			_step_queue->finish();
+			_step_data_transfer->finish();
+			_finalize_queue->finish();
 
 			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
 			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
-			_kernel_random_initialize->launch(_lane.queue, 0, _wavefrontPathCount);
+			_kernel_random_initialize->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path->item());
 			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path->count());
-			_kernel_initialize_all_as_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
+			_kernel_initialize_all_as_new_path->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// initialize queue state
-			_queue_lambertian->clear(_lane.queue);
-			_queue_specular->clear(_lane.queue);
-			_queue_dierectric->clear(_lane.queue);
-			_queue_ward->clear(_lane.queue);
+			_queue_lambertian->clear(_step_queue->queue());
+			_queue_specular->clear(_step_queue->queue());
+			_queue_dierectric->clear(_step_queue->queue());
+			_queue_ward->clear(_step_queue->queue());
 
 			// clear buffer
-			_accum_color->fill(RGB32AccumulationValueType(), _lane.queue);
-			_accum_normal->fill(RGB32AccumulationValueType(), _lane.queue);
+			_accum_color->fill(RGB32AccumulationValueType(), _step_queue->queue());
+			_accum_normal->fill(RGB32AccumulationValueType(), _step_queue->queue());
 
 			// initialize_mutex
-			_intermediate_mutex->fill(1, _lane.queue);
-			_is_holding_intermediate_in_step->fill(0, _lane.queue);
-			_is_holding_intermediate_in_merge->fill(0, _lane.queue);
+			_intermediate_mutex->fill(1, _step_queue->queue());
+			_is_holding_intermediate_in_step->fill(0, _step_queue->queue());
+			_is_holding_intermediate_in_merge->fill(0, _step_queue->queue());
 
 			_avg_sample = 0;
 		}
 
 		void step() {
-			// rmt_ScopedCPUSample(step, RMTSF_Aggregate);
-
-			// OPTICK_FRAME("MainThread");
 			{
 				std::lock_guard <std::mutex> lock(_restart_mutex);
 				if (_restart_bang) {
@@ -510,11 +510,11 @@ namespace rt {
 				_kernel_new_path->setArgument(arg++, _mem_random_state->memory());
 				_kernel_new_path->setArgument(arg++, _mem_next_pixel_index->memory());
 				_kernel_new_path->setArgument(arg++, standardCamera(_camera));
-				_kernel_new_path->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_new_path->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
 				_kernel_finalize_new_path->setArgument(1, _queue_new_path->count());
-				_kernel_finalize_new_path->launch(_lane.queue, 0, 1);
+				_kernel_finalize_new_path->launch(_step_queue->queue(), 0, 1);
 			}
 
 			// Simple Envmap Sampling
@@ -540,7 +540,7 @@ namespace rt {
 				}
 
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->size());
-				_kernel_envmap_sampling->launch(_lane.queue, 0, _wavefrontPathCount)->wait();
+				_kernel_envmap_sampling->launch(_step_queue->queue(), 0, _wavefrontPathCount)->wait();
 			}
 
 
@@ -566,9 +566,9 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->width());
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->height());
 
-				_kernel_lambertian->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_lambertian->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				_queue_lambertian->clear(_lane.queue);
+				_queue_lambertian->clear(_step_queue->queue());
 			}
 			if (_materialBuffer->wards->size() != 0) {
 				int arg = 0;
@@ -592,9 +592,9 @@ namespace rt {
 				_kernel_ward->setArgument(arg++, _envmapBuffer->envmap->width());
 				_kernel_ward->setArgument(arg++, _envmapBuffer->envmap->height());
 
-				_kernel_ward->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_ward->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				_queue_ward->clear(_lane.queue);
+				_queue_ward->clear(_step_queue->queue());
 			}
 
 			if(_materialBuffer->speculars->size() != 0 && _materialBuffer->dierectrics->size() != 0) {
@@ -611,10 +611,10 @@ namespace rt {
 				_kernel_delta_materials->setArgument(arg++, _materialBuffer->speculars->memory());
 				_kernel_delta_materials->setArgument(arg++, _materialBuffer->dierectrics->memory());
 
-				_kernel_delta_materials->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_delta_materials->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				_queue_specular->clear(_lane.queue);
-				_queue_dierectric->clear(_lane.queue);
+				_queue_specular->clear(_step_queue->queue());
+				_queue_dierectric->clear(_step_queue->queue());
 			}
 
 			{
@@ -625,7 +625,7 @@ namespace rt {
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_idsCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
 				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
-				_kernel_extension_ray_cast->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_extension_ray_cast->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			{
@@ -648,83 +648,82 @@ namespace rt {
 				_kernel_logic->setArgument(arg++, _queue_dierectric->count());
 				_kernel_logic->setArgument(arg++, _queue_ward->item());
 				_kernel_logic->setArgument(arg++, _queue_ward->count());
-				_kernel_logic->launch(_lane.queue, 0, _wavefrontPathCount);
+				_kernel_logic->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			// to intermediate if it is possible.
 			_kernel_acquire_mutex_in_step->setArgument(0, _intermediate_mutex->memory());
 			_kernel_acquire_mutex_in_step->setArgument(1, _is_holding_intermediate_in_step->memory());
-			_kernel_acquire_mutex_in_step->launch(_lane.queue, 0, 1);
+			_kernel_acquire_mutex_in_step->launch(_step_queue->queue(), 0, 1);
 
 			_kernel_accumlation_to_intermediate->setArgument(0, _accum_color->memory());
-			_kernel_accumlation_to_intermediate->setArgument(1, _accum_color_intermediate->memory());
+			_kernel_accumlation_to_intermediate->setArgument(1, _accum_color_intermediate_shared->memory());
 			_kernel_accumlation_to_intermediate->setArgument(2, _is_holding_intermediate_in_step->memory());
-			_kernel_accumlation_to_intermediate->launch(_lane.queue, 0, _accum_color_intermediate->size());
+			_kernel_accumlation_to_intermediate->launch(_step_queue->queue(), 0, _accum_color_intermediate_shared->size());
 
 			_kernel_free_mutex_in_step->setArgument(0, _intermediate_mutex->memory());
 			_kernel_free_mutex_in_step->setArgument(1, _is_holding_intermediate_in_step->memory());
-			_kernel_free_mutex_in_step->launch(_lane.queue, 0, 1);
+			_kernel_free_mutex_in_step->launch(_step_queue->queue(), 0, 1);
 
 			// for previews
 			if (onNormalRecieved) {
-				_inspect_normal->mark_begin_touch(_lane.queue);
+				_inspect_normal->mark_begin_touch(_step_queue->queue());
 
 				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(0, _accum_normal->memory());
 				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(1, _inspect_normal->memory());
-				auto touch_buffer = _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
+				auto touch_buffer = _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_step_queue->queue(), 0, _camera.resolution_x * _camera.resolution_y);
 
 				auto f = onNormalRecieved;
 				int w = _camera.resolution_x;
 				int h = _camera.resolution_y;
-				_inspect_normal->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _data_transfer0->queue(), [f, w, h](RGBA8ValueType *ptr) {
+				_inspect_normal->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _step_data_transfer->queue(), [f, w, h](RGBA8ValueType *ptr) {
 					f(ptr, w, h);
 				});
 			}
 
 			// for stat
-			_all_sample_count->mark_begin_touch(_lane.queue);
+			_all_sample_count->mark_begin_touch(_step_queue->queue());
 
-			_all_sample_count->fill(0, _lane.queue);
+			_all_sample_count->fill(0, _step_queue->queue());
 			_kernel_stat->setArgument(0, _accum_color->memory());
 			_kernel_stat->setArgument(1, _all_sample_count->memory());
-			auto touch_stat = _kernel_stat->launch(_lane.queue, 0, _camera.resolution_x * _camera.resolution_y);
+			auto touch_stat = _kernel_stat->launch(_step_queue->queue(), 0, _camera.resolution_x * _camera.resolution_y);
 
 			int w = _camera.resolution_x;
 			int h = _camera.resolution_y;
-			_all_sample_count->mark_end_touch_and_schedule_read(_lane.context, touch_stat, _data_transfer0->queue(), [w, h, this](uint32_t *ptr) {
+			_all_sample_count->mark_end_touch_and_schedule_read(_lane.context, touch_stat, _step_data_transfer->queue(), [w, h, this](uint32_t *ptr) {
 				uint64_t all_sample_count = (uint64_t)ptr[0] + (uint64_t)ptr[1] * 4294967296llu;
 				_avg_sample = (float)((double)all_sample_count / (w * h));
 			});
 
-			_eventQueue += enqueue_marker(_lane.queue);
+			_eventQueue += enqueue_marker(_step_queue->queue());
 		}
 
-		bool try_lock_intermediate() {
+		// Finalize Process, copy _accum_color_intermediate_shared to _accum_color_intermediate
+		std::shared_ptr<OpenCLEvent> update_intermediate() {
 			_kernel_acquire_mutex_in_merge->setArgument(0, _intermediate_mutex->memory());
 			_kernel_acquire_mutex_in_merge->setArgument(1, _is_holding_intermediate_in_merge->memory());
-			_kernel_acquire_mutex_in_merge->launch(_post_processing_queue->queue(), 0, 1);
-			_is_holding_intermediate_in_merge->enqueue_read(_post_processing_queue->queue())->wait();
-			return *_is_holding_intermediate_in_merge->ptr() == 1;
-		}
-		void unlock_intermediate() {
+			_kernel_acquire_mutex_in_merge->launch(_finalize_queue->queue(), 0, 1);
+
+			_kernel_copy_if_locked->setArgument(0, _accum_color_intermediate_shared->memory());
+			_kernel_copy_if_locked->setArgument(1, _accum_color_intermediate->memory());
+			_kernel_copy_if_locked->setArgument(2, _is_holding_intermediate_in_merge->memory());
+			_kernel_copy_if_locked->launch(_finalize_queue->queue(), 0, _accum_color_intermediate_shared->size());
+			
 			_kernel_free_mutex_in_merge->setArgument(0, _intermediate_mutex->memory());
 			_kernel_free_mutex_in_merge->setArgument(1, _is_holding_intermediate_in_merge->memory());
-			_kernel_free_mutex_in_merge->launch(_post_processing_queue->queue(), 0, 1);
+			return _kernel_free_mutex_in_merge->launch(_finalize_queue->queue(), 0, 1);
 		}
 
-		// Lock Required
-		// create_intermediate_event_lhs, create_intermediate_event_rhs is maybe null
-		std::shared_ptr<OpenCLEvent> merge_from(WavefrontLane *other, std::shared_ptr<OpenCLEvent> create_intermediate_event_lhs, std::shared_ptr<OpenCLEvent> create_intermediate_event_rhs) {
+		std::shared_ptr<OpenCLEvent> merge_from(WavefrontLane *other) {
 			auto other_lane = other->lane();
 			int N = _accum_color_intermediate->size();
 
-			// read memory from other
-			OpenCLEventList read_wait_events;
-			if (create_intermediate_event_rhs) {
-				read_wait_events.add(create_intermediate_event_rhs->event_object());
-			}
-			auto event_read = other->_accum_color_intermediate->enqueue_read(other->data_transfer1(), read_wait_events);
-			
+			auto event_read = other->_accum_color_intermediate->enqueue_read(other->_finalize_queue->queue());
+
+			// for wait
+			other->_finalize_queue->flush();
+
 			// ** Wait read finish on CPU **
 			event_read->wait();
 
@@ -736,43 +735,32 @@ namespace rt {
 			}
 
 			// write
-			auto write_event = _accum_color_intermediate_other->enqueue_write(_data_transfer1->queue());
-
-			// sync
-			OpenCLEventList merge_wait_events;
-			merge_wait_events.add(write_event->event_object());
-			if (create_intermediate_event_lhs) {
-				merge_wait_events.add(create_intermediate_event_lhs->event_object());
-			}
+			_accum_color_intermediate_other->enqueue_write(_finalize_queue->queue());
 
 			// merge
-			return _kernel_merge_intermediate->launch(_post_processing_queue->queue(), 0, N, merge_wait_events);
+			_kernel_merge_intermediate->setArgument(0, _accum_color_intermediate->memory());
+			_kernel_merge_intermediate->setArgument(1, _accum_color_intermediate_other->memory());
+			return _kernel_merge_intermediate->launch(_finalize_queue->queue(), 0, N);
 		}
 
-		// create_intermediate_event maybe null.
-		ReadableBuffer<RGBA8ValueType> *finalize_color(std::shared_ptr<OpenCLEvent> create_intermediate_event) {
+		ReadableBuffer<RGBA8ValueType> *finalize_color() {
 			int N = _accum_color_intermediate->size();
+			_kernel_tonemap->setArgument(0, _accum_color_intermediate->memory());
+			_kernel_tonemap->setArgument(1, _final_color->memory());
+			_kernel_tonemap->launch(_finalize_queue->queue(), 0, N);
+			auto read_event = _final_color->enqueue_read(_finalize_queue->queue());
+			
+			// for wait
+			_finalize_queue->flush();
 
-			OpenCLEventList waits;
-			if (create_intermediate_event) {
-				waits.add(create_intermediate_event->event_object());
-			}
-
-			auto tonemap_event = _kernel_tonemap->launch(_post_processing_queue->queue(), 0, N, waits);
-			auto read_event = _final_color->enqueue_read(_data_transfer1->queue(), OpenCLEventList(tonemap_event->event_object()));
 			read_event->wait();
 			return _final_color.get();
 		}
+
 		OpenCLLane lane() const {
 			return _lane;
 		}
-		cl_command_queue data_transfer0() const {
-			return _data_transfer0->queue();
-		}
-		cl_command_queue data_transfer1() const {
-			return _data_transfer1->queue();
-		}
-
+	
 		void re_start(int lane_index, const houdini_alembic::CameraObject &camera) {
 			std::lock_guard <std::mutex> lock(_restart_mutex);
 			_restart_bang = true;
@@ -789,15 +777,16 @@ namespace rt {
 		OpenCLLane _lane;
 		houdini_alembic::CameraObject _camera;
 
-		std::unique_ptr<OpenCLQueue> _data_transfer0; // Now used by step process
-		std::unique_ptr<OpenCLQueue> _data_transfer1; // Now used by merge and create image process
-		std::unique_ptr<OpenCLQueue> _post_processing_queue;
+		std::unique_ptr<OpenCLQueue> _step_queue;     // Step rocess
+		std::unique_ptr<OpenCLQueue> _step_data_transfer; // Now used by step process
+		std::unique_ptr<OpenCLQueue> _finalize_queue;
 
 		std::unique_ptr<SceneBuffer> _sceneBuffer;
 		std::unique_ptr<MaterialBuffer> _materialBuffer;
 		std::unique_ptr<EnvmapBuffer> _envmapBuffer;
 
 		// kernels
+		// どっちのスレッドから使われるのかが少し不明瞭
 		std::unique_ptr<OpenCLKernel> _kernel_random_initialize;
 
 		std::unique_ptr<OpenCLKernel> _kernel_initialize_all_as_new_path;
@@ -825,7 +814,7 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_free_mutex_in_step;
 		std::unique_ptr<OpenCLKernel> _kernel_acquire_mutex_in_merge;
 		std::unique_ptr<OpenCLKernel> _kernel_free_mutex_in_merge;
-
+		std::unique_ptr<OpenCLKernel> _kernel_copy_if_locked;
 
 		std::unique_ptr<OpenCLKernel> _kernel_stat;
 
@@ -863,8 +852,9 @@ namespace rt {
 		std::unique_ptr<ReadableBuffer<int32_t>> _is_holding_intermediate_in_merge;
 
 		// final output
-		std::unique_ptr<ReadableBuffer<OpenCLHalf4>> _accum_color_intermediate;
-		std::unique_ptr<WritableBuffer<OpenCLHalf4>> _accum_color_intermediate_other;
+		std::unique_ptr<OpenCLBuffer<RGB16IntermediateValueType>>   _accum_color_intermediate_shared;
+		std::unique_ptr<ReadableBuffer<RGB16IntermediateValueType>> _accum_color_intermediate;
+		std::unique_ptr<WritableBuffer<RGB16IntermediateValueType>> _accum_color_intermediate_other;
 		std::unique_ptr<ReadableBuffer<RGBA8ValueType>> _final_color;
 		
 		EventQueue _eventQueue;
@@ -954,6 +944,8 @@ namespace rt {
 				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			}
 
+			// std::swap(_wavefront_lanes[0], _wavefront_lanes[1]);
+
 			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);
 			//	if (lane.is_gpu == false) {
@@ -977,28 +969,11 @@ namespace rt {
 		}
 
 		void create_color_image() {
-			// Prepare
-			//for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-			//	auto color_event = _wavefront_lanes[i]->create_color_intermediate();
-			//	intermediate_complete_events.emplace_back(color_event);
-			//}
-			std::bitset<32> is_locked = 0;
-			uint32_t all_locked = ~(0xFFFFFFFF << _wavefront_lanes.size());
-			do {
-				for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-					bool is_locked_already = is_locked[i];
-					if (is_locked_already == false) {
-						if (_wavefront_lanes[i]->try_lock_intermediate()) {
-							is_locked[i] = true;
-						}
-					}
-				}
-			} while (is_locked != all_locked);
+			// Deffered Update
+			RT_ASSERT(_wavefront_lanes.size() < 32);
+			std::bitset<32> is_updated_intermediate = 0;
 
-			// Merge
-			std::vector <std::shared_ptr<OpenCLEvent>> intermediate_complete_events;
-			intermediate_complete_events.resize(_wavefront_lanes.size());
-
+			// Merge Process
 			std::vector<int> lanes;
 			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
 				lanes.push_back(i);
@@ -1012,12 +987,27 @@ namespace rt {
 					int index_merge1 = lanes[i * 2 + 1];
 					auto lane0 = _wavefront_lanes[index_merge0].get();
 					auto lane1 = _wavefront_lanes[index_merge1].get();
-					auto intermediate_complete_event_lhs = intermediate_complete_events[index_merge0];
-					auto intermediate_complete_event_rhs = intermediate_complete_events[index_merge1];
-					
-					g.run([index_merge0, index_merge1, lane0, lane1, intermediate_complete_event_lhs, intermediate_complete_event_rhs, &intermediate_complete_events]() {
-						// Need to update intermediate_complete_events because intermediate will be updated.
-						intermediate_complete_events[index_merge0] = lane0->merge_from(lane1, intermediate_complete_event_lhs, intermediate_complete_event_rhs);
+
+					bool need_update0 = false;
+					bool need_update1 = false;
+
+					if (is_updated_intermediate[index_merge0] == false) {
+						need_update0 = true;
+						is_updated_intermediate[index_merge0] = true;
+					}
+					if (is_updated_intermediate[index_merge1] == false) {
+						need_update1 = true;
+						is_updated_intermediate[index_merge1] = true;
+					}
+
+					g.run([lane0, lane1, need_update0, need_update1]() {
+						if (need_update0) {
+							lane0->update_intermediate();
+						}
+						if (need_update1) {
+							lane1->update_intermediate();
+						}
+						lane0->merge_from(lane1);
 					});
 				}
 				g.wait();
@@ -1031,11 +1021,7 @@ namespace rt {
 				lanes = new_lanes;
 			}
 
-			auto final_color = _wavefront_lanes[0]->finalize_color(intermediate_complete_events[0]);
-
-			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-				_wavefront_lanes[i]->unlock_intermediate();
-			}
+			auto final_color = _wavefront_lanes[0]->finalize_color();
 
 			int w = _camera->resolution_x;
 			int h = _camera->resolution_y;

@@ -33,7 +33,7 @@ typedef __attribute__ ((aligned(8))) struct {
     half g_divided;
     half b_divided;
     ushort sampleCount;
-} RGB16AccumulationValueType;
+} RGB16IntermediateValueType;
 
 #define kMaterialType_Lambertian 1
 #define kMaterialType_Specular   2

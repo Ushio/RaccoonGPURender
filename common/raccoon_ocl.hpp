@@ -492,6 +492,10 @@ namespace rt {
 			cl_int status = clFinish(_queue.get());
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFinish() failed");
 		}
+		void flush() {
+			cl_int status = clFlush(_queue.get());
+			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clFlush() failed");
+		}
 	private:
 		std::shared_ptr<std::remove_pointer<cl_command_queue>::type> _queue;
 	};
@@ -614,7 +618,7 @@ namespace rt {
 				}
 			}
 
-			tbb::parallel_for(tbb::blocked_range<int>(0, _deviceContexts.size()), [&](const tbb::blocked_range<int> &range) {
+			tbb::parallel_for(tbb::blocked_range<int>(0, (int)_deviceContexts.size()), [&](const tbb::blocked_range<int> &range) {
 				for (int i = range.begin(); i < range.end(); ++i) {
 #if RACOON_OCL_ENABLE_TIMELINE_PROFILE
 					SCOPED_PROFILE("create context & queue");

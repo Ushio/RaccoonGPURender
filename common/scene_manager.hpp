@@ -335,7 +335,7 @@ namespace rt {
 		}
 
 		template <class T>
-		std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, std::size_t size) const {
+		std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, uint32_t size) const {
 			if (size == 0) {
 				T one;
 				return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, &one, 1, OpenCLKernelBufferMode::ReadOnly));

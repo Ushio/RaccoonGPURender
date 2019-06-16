@@ -40,7 +40,7 @@ TEST_CASE("Random") {
 
 		int N = 100000;
 		std::vector<glm::uvec4> state(N);
-		OpenCLBuffer<glm::uvec4> state_gpu(lane.context, N);
+		OpenCLBuffer<glm::uvec4> state_gpu(lane.context, N, rt::OpenCLKernelBufferMode::ReadWrite);
 		{
 			OpenCLKernel kernel("random_initialize", program.program());
 			kernel.setArgument(0, state_gpu.memory());
@@ -49,7 +49,7 @@ TEST_CASE("Random") {
 		}
 		
 		OpenCLKernel kernel("random_generate", program.program());
-		OpenCLBuffer<float> value_gpu(lane.context, N);
+		OpenCLBuffer<float> value_gpu(lane.context, N, rt::OpenCLKernelBufferMode::ReadWrite);
 		std::vector<float> value(N);
 		for (int i = 0; i < 10; ++i) {
 			state_gpu.read_immediately(state.data(), lane.queue);
@@ -88,8 +88,8 @@ TEST_CASE("Atomic") {
 			const int N = 100001;
 			int32_t sum_i = 0;
 			float sum_f = 0;
-			OpenCLBuffer<int32_t> sum_i_gpu(lane.context, &sum_i, 1);
-			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
+			OpenCLBuffer<int32_t> sum_i_gpu(lane.context, &sum_i, 1, rt::OpenCLKernelBufferMode::ReadWrite);
+			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1, rt::OpenCLKernelBufferMode::ReadWrite);
 			kernel.setArgument(0, sum_i_gpu.memory());
 			kernel.setArgument(1, sum_f_gpu.memory());
 			kernel.launch(lane.queue, 0, N);
@@ -104,7 +104,7 @@ TEST_CASE("Atomic") {
 
 			const int N = 100001;
 			float sum_f = 0;
-			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1);
+			OpenCLBuffer<float> sum_f_gpu(lane.context, &sum_f, 1, rt::OpenCLKernelBufferMode::ReadWrite);
 			kernel.setArgument(0, sum_f_gpu.memory());
 			kernel.launch(lane.queue, 0, N);
 			sum_f_gpu.read_immediately(&sum_f, lane.queue);
@@ -133,8 +133,8 @@ TEST_CASE("Simple Queue") {
 
 			const int N = 10000000;
 			uint32_t queue_next_index = 0;
-			OpenCLBuffer<uint32_t> queue_next_index_gpu(lane.context, &queue_next_index, 1);
-			OpenCLBuffer<int32_t> queue_value_gpu(lane.context, N);
+			OpenCLBuffer<uint32_t> queue_next_index_gpu(lane.context, &queue_next_index, 1, rt::OpenCLKernelBufferMode::ReadWrite);
+			OpenCLBuffer<int32_t> queue_value_gpu(lane.context, N, rt::OpenCLKernelBufferMode::ReadWrite);
 			kernel.setArgument(0, queue_next_index_gpu.memory());
 			kernel.setArgument(1, queue_value_gpu.memory());
 			auto kernel_event = kernel.launch(lane.queue, 0, N);
@@ -155,8 +155,8 @@ TEST_CASE("Simple Queue") {
 
 			const int N = 10000000;
 			uint32_t queue_next_index = 0;
-			OpenCLBuffer<uint32_t> queue_next_index_gpu(lane.context, &queue_next_index, 1);
-			OpenCLBuffer<int32_t> queue_value_gpu(lane.context, N);
+			OpenCLBuffer<uint32_t> queue_next_index_gpu(lane.context, &queue_next_index, 1, rt::OpenCLKernelBufferMode::ReadWrite);
+			OpenCLBuffer<int32_t> queue_value_gpu(lane.context, N, rt::OpenCLKernelBufferMode::ReadWrite);
 			kernel.setArgument(0, queue_next_index_gpu.memory());
 			kernel.setArgument(1, queue_value_gpu.memory());
 			auto kernel_event = kernel.launch(lane.queue, 0, N);
@@ -279,11 +279,11 @@ TEST_CASE("AABB") {
 				OpenCLProgram program("aabb_unit_test.cl", lane.context, lane.device_id);
 				OpenCLKernel kernel("run", program.program());
 
-				OpenCLBuffer<OpenCLFloat4> ros_gpu(lane.context, ros.data(), ros.size());
-				OpenCLBuffer<OpenCLFloat4> rds_gpu(lane.context, rds.data(), rds.size());
-				OpenCLBuffer<float> tmins_gpu(lane.context, tmins.data(), tmins.size());
-				OpenCLBuffer<int32_t> insides_gpu(lane.context, insides.data(), insides.size());
-				OpenCLBuffer<int32_t> results_gpu(lane.context, ros.size());
+				OpenCLBuffer<OpenCLFloat4> ros_gpu(lane.context, ros.data(), ros.size(), rt::OpenCLKernelBufferMode::ReadWrite);
+				OpenCLBuffer<OpenCLFloat4> rds_gpu(lane.context, rds.data(), rds.size(), rt::OpenCLKernelBufferMode::ReadWrite);
+				OpenCLBuffer<float> tmins_gpu(lane.context, tmins.data(), tmins.size(), rt::OpenCLKernelBufferMode::ReadWrite);
+				OpenCLBuffer<int32_t> insides_gpu(lane.context, insides.data(), insides.size(), rt::OpenCLKernelBufferMode::ReadWrite);
+				OpenCLBuffer<int32_t> results_gpu(lane.context, ros.size(), rt::OpenCLKernelBufferMode::ReadWrite);
 
 				kernel.setArgument(0, ros_gpu.memory());
 				kernel.setArgument(1, rds_gpu.memory());

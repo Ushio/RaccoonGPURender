@@ -412,7 +412,7 @@ namespace rt {
 			_accum_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
 			
 			// inspect
-			_inspect_normal = unique(new PeriodicReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+			_aov_normal_rgb8 = unique(new PeriodicReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
 			_accum_color_intermediate_shared = unique(new OpenCLBuffer<RGB16IntermediateValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
 			_accum_color_intermediate       = unique(new ReadableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
@@ -460,12 +460,16 @@ namespace rt {
 			_step_data_transfer->finish();
 			_finalize_queue->finish();
 
-			_kernel_random_initialize->setArgument(0, _mem_random_state->memory());
-			_kernel_random_initialize->setArgument(1, lane_index * _wavefrontPathCount);
+			_kernel_random_initialize->setArguments(
+				_mem_random_state->memory(),
+				lane_index * _wavefrontPathCount
+			);
 			_kernel_random_initialize->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-			_kernel_initialize_all_as_new_path->setArgument(0, _queue_new_path->item());
-			_kernel_initialize_all_as_new_path->setArgument(1, _queue_new_path->count());
+			_kernel_initialize_all_as_new_path->setArguments(
+				_queue_new_path->item(),
+				_queue_new_path->count()
+			);
 			_kernel_initialize_all_as_new_path->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// initialize queue state
@@ -501,19 +505,23 @@ namespace rt {
 				_step_count++;
 			}
 
+			// New Path
 			{
-				int arg = 0;
-				_kernel_new_path->setArgument(arg++, _queue_new_path->item());
-				_kernel_new_path->setArgument(arg++, _queue_new_path->count());
-				_kernel_new_path->setArgument(arg++, _mem_path->memory());
-				_kernel_new_path->setArgument(arg++, _mem_shading_results->memory());
-				_kernel_new_path->setArgument(arg++, _mem_random_state->memory());
-				_kernel_new_path->setArgument(arg++, _mem_next_pixel_index->memory());
-				_kernel_new_path->setArgument(arg++, standardCamera(_camera));
+				_kernel_new_path->setArguments(
+					_queue_new_path->item(),
+					_queue_new_path->count(),
+					_mem_path->memory(),
+					_mem_shading_results->memory(),
+					_mem_random_state->memory(),
+					_mem_next_pixel_index->memory(),
+					standardCamera(_camera)
+				);
 				_kernel_new_path->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				_kernel_finalize_new_path->setArgument(0, _mem_next_pixel_index->memory());
-				_kernel_finalize_new_path->setArgument(1, _queue_new_path->count());
+				_kernel_finalize_new_path->setArguments(
+					_mem_next_pixel_index->memory(),
+					_queue_new_path->count()
+				);
 				_kernel_finalize_new_path->launch(_step_queue->queue(), 0, 1);
 			}
 
@@ -598,18 +606,19 @@ namespace rt {
 			}
 
 			if(_materialBuffer->speculars->size() != 0 && _materialBuffer->dierectrics->size() != 0) {
-				int arg = 0;
-				_kernel_delta_materials->setArgument(arg++, _mem_path->memory());
-				_kernel_delta_materials->setArgument(arg++, _mem_random_state->memory());
-				_kernel_delta_materials->setArgument(arg++, _mem_extension_results->memory());
-				_kernel_delta_materials->setArgument(arg++, _mem_shading_results->memory());
-				_kernel_delta_materials->setArgument(arg++, _queue_specular->item());
-				_kernel_delta_materials->setArgument(arg++, _queue_specular->count());
-				_kernel_delta_materials->setArgument(arg++, _queue_dierectric->item());
-				_kernel_delta_materials->setArgument(arg++, _queue_dierectric->count());
-				_kernel_delta_materials->setArgument(arg++, _materialBuffer->materials->memory());
-				_kernel_delta_materials->setArgument(arg++, _materialBuffer->speculars->memory());
-				_kernel_delta_materials->setArgument(arg++, _materialBuffer->dierectrics->memory());
+				_kernel_delta_materials->setArguments(
+					_mem_path->memory(),
+					_mem_random_state->memory(),
+					_mem_extension_results->memory(),
+					_mem_shading_results->memory(),
+					_queue_specular->item(),
+					_queue_specular->count(),
+					_queue_dierectric->item(),
+					_queue_dierectric->count(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->speculars->memory(),
+					_materialBuffer->dierectrics->memory()
+				);
 
 				_kernel_delta_materials->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
@@ -618,65 +627,77 @@ namespace rt {
 			}
 
 			{
-				int arg = 0;
-				_kernel_extension_ray_cast->setArgument(arg++, _mem_path->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _mem_extension_results->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->stacklessBVHNodesCL->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->primitive_idsCL->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->indicesCL->memory());
-				_kernel_extension_ray_cast->setArgument(arg++, _sceneBuffer->pointsCL->memory());
+				_kernel_extension_ray_cast->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_sceneBuffer->stacklessBVHNodesCL->memory(),
+					_sceneBuffer->primitive_idsCL->memory(),
+					_sceneBuffer->indicesCL->memory(),
+					_sceneBuffer->pointsCL->memory()
+				);
 				_kernel_extension_ray_cast->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			{
-				int arg = 0;
-				_kernel_logic->setArgument(arg++, _mem_path->memory());
-				_kernel_logic->setArgument(arg++, _mem_random_state->memory());
-				_kernel_logic->setArgument(arg++, _mem_extension_results->memory());
-				_kernel_logic->setArgument(arg++, _mem_shading_results->memory());
-				_kernel_logic->setArgument(arg++, _envmapBuffer->envmap->memory());
-				_kernel_logic->setArgument(arg++, _accum_color->memory());
-				_kernel_logic->setArgument(arg++, _accum_normal->memory());
-				_kernel_logic->setArgument(arg++, _materialBuffer->materials->memory());
-				_kernel_logic->setArgument(arg++, _queue_new_path->item());
-				_kernel_logic->setArgument(arg++, _queue_new_path->count());
-				_kernel_logic->setArgument(arg++, _queue_lambertian->item());
-				_kernel_logic->setArgument(arg++, _queue_lambertian->count());
-				_kernel_logic->setArgument(arg++, _queue_specular->item());
-				_kernel_logic->setArgument(arg++, _queue_specular->count());
-				_kernel_logic->setArgument(arg++, _queue_dierectric->item());
-				_kernel_logic->setArgument(arg++, _queue_dierectric->count());
-				_kernel_logic->setArgument(arg++, _queue_ward->item());
-				_kernel_logic->setArgument(arg++, _queue_ward->count());
+				_kernel_logic->setArguments(
+					_mem_path->memory(),
+					_mem_random_state->memory(),
+					_mem_extension_results->memory(),
+					_mem_shading_results->memory(),
+					_envmapBuffer->envmap->memory(),
+					_accum_color->memory(),
+					_accum_normal->memory(),
+					_materialBuffer->materials->memory(),
+					_queue_new_path->item(),
+					_queue_new_path->count(),
+					_queue_lambertian->item(),
+					_queue_lambertian->count(),
+					_queue_specular->item(),
+					_queue_specular->count(),
+					_queue_dierectric->item(),
+					_queue_dierectric->count(),
+					_queue_ward->item(),
+					_queue_ward->count()
+				);
 				_kernel_logic->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			// to intermediate if it is possible.
-			_kernel_acquire_mutex_in_step->setArgument(0, _intermediate_mutex->memory());
-			_kernel_acquire_mutex_in_step->setArgument(1, _is_holding_intermediate_in_step->memory());
-			_kernel_acquire_mutex_in_step->launch(_step_queue->queue(), 0, 1);
+			{
+				_kernel_acquire_mutex_in_step->setArguments(
+					_intermediate_mutex->memory(),
+					_is_holding_intermediate_in_step->memory()
+				);
+				_kernel_acquire_mutex_in_step->launch(_step_queue->queue(), 0, 1);
 
-			_kernel_accumlation_to_intermediate->setArgument(0, _accum_color->memory());
-			_kernel_accumlation_to_intermediate->setArgument(1, _accum_color_intermediate_shared->memory());
-			_kernel_accumlation_to_intermediate->setArgument(2, _is_holding_intermediate_in_step->memory());
-			_kernel_accumlation_to_intermediate->launch(_step_queue->queue(), 0, _accum_color_intermediate_shared->size());
+				_kernel_accumlation_to_intermediate->setArguments(
+					_accum_color->memory(),
+					_accum_color_intermediate_shared->memory(),
+					_is_holding_intermediate_in_step->memory()
+				);
+				_kernel_accumlation_to_intermediate->launch(_step_queue->queue(), 0, _accum_color_intermediate_shared->size());
 
-			_kernel_free_mutex_in_step->setArgument(0, _intermediate_mutex->memory());
-			_kernel_free_mutex_in_step->setArgument(1, _is_holding_intermediate_in_step->memory());
-			_kernel_free_mutex_in_step->launch(_step_queue->queue(), 0, 1);
+				_kernel_free_mutex_in_step->setArguments(
+					_intermediate_mutex->memory(),
+					_is_holding_intermediate_in_step->memory()
+				);
+				_kernel_free_mutex_in_step->launch(_step_queue->queue(), 0, 1);
+			}
 
 			// for previews
 			if (onNormalRecieved) {
-				_inspect_normal->mark_begin_touch(_step_queue->queue());
+				_aov_normal_rgb8->mark_begin_touch(_step_queue->queue());
 
-				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(0, _accum_normal->memory());
-				_kernel_RGB32Accumulation_to_RGBA8_linear->setArgument(1, _inspect_normal->memory());
+				_kernel_RGB32Accumulation_to_RGBA8_linear->setArguments(
+					_accum_normal->memory(),
+					_aov_normal_rgb8->memory()
+				);
 				auto touch_buffer = _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_step_queue->queue(), 0, _camera.resolution_x * _camera.resolution_y);
 
 				auto f = onNormalRecieved;
 				int w = _camera.resolution_x;
 				int h = _camera.resolution_y;
-				_inspect_normal->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _step_data_transfer->queue(), [f, w, h](RGBA8ValueType *ptr) {
+				_aov_normal_rgb8->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _step_data_transfer->queue(), [f, w, h](RGBA8ValueType *ptr) {
 					f(ptr, w, h);
 				});
 			}
@@ -685,8 +706,10 @@ namespace rt {
 			_all_sample_count->mark_begin_touch(_step_queue->queue());
 
 			_all_sample_count->fill(0, _step_queue->queue());
-			_kernel_stat->setArgument(0, _accum_color->memory());
-			_kernel_stat->setArgument(1, _all_sample_count->memory());
+			_kernel_stat->setArguments(
+				_accum_color->memory(),
+				_all_sample_count->memory()
+			);
 			auto touch_stat = _kernel_stat->launch(_step_queue->queue(), 0, _camera.resolution_x * _camera.resolution_y);
 
 			int w = _camera.resolution_x;
@@ -701,17 +724,23 @@ namespace rt {
 
 		// Finalize Process, copy _accum_color_intermediate_shared to _accum_color_intermediate
 		std::shared_ptr<OpenCLEvent> update_intermediate() {
-			_kernel_acquire_mutex_in_merge->setArgument(0, _intermediate_mutex->memory());
-			_kernel_acquire_mutex_in_merge->setArgument(1, _is_holding_intermediate_in_merge->memory());
+			_kernel_acquire_mutex_in_merge->setArguments(
+				_intermediate_mutex->memory(),
+				_is_holding_intermediate_in_merge->memory()
+			);
 			_kernel_acquire_mutex_in_merge->launch(_finalize_queue->queue(), 0, 1);
 
-			_kernel_copy_if_locked->setArgument(0, _accum_color_intermediate_shared->memory());
-			_kernel_copy_if_locked->setArgument(1, _accum_color_intermediate->memory());
-			_kernel_copy_if_locked->setArgument(2, _is_holding_intermediate_in_merge->memory());
+			_kernel_copy_if_locked->setArguments(
+				_accum_color_intermediate_shared->memory(),
+				_accum_color_intermediate->memory(),
+				_is_holding_intermediate_in_merge->memory()
+			);
 			_kernel_copy_if_locked->launch(_finalize_queue->queue(), 0, _accum_color_intermediate_shared->size());
 			
-			_kernel_free_mutex_in_merge->setArgument(0, _intermediate_mutex->memory());
-			_kernel_free_mutex_in_merge->setArgument(1, _is_holding_intermediate_in_merge->memory());
+			_kernel_free_mutex_in_merge->setArguments(
+				_intermediate_mutex->memory(),
+				_is_holding_intermediate_in_merge->memory()
+			);
 			return _kernel_free_mutex_in_merge->launch(_finalize_queue->queue(), 0, 1);
 		}
 
@@ -738,15 +767,19 @@ namespace rt {
 			_accum_color_intermediate_other->enqueue_write(_finalize_queue->queue());
 
 			// merge
-			_kernel_merge_intermediate->setArgument(0, _accum_color_intermediate->memory());
-			_kernel_merge_intermediate->setArgument(1, _accum_color_intermediate_other->memory());
+			_kernel_merge_intermediate->setArguments(
+				_accum_color_intermediate->memory(),
+				_accum_color_intermediate_other->memory()
+			);
 			return _kernel_merge_intermediate->launch(_finalize_queue->queue(), 0, N);
 		}
 
 		ReadableBuffer<RGBA8ValueType> *finalize_color() {
 			int N = _accum_color_intermediate->size();
-			_kernel_tonemap->setArgument(0, _accum_color_intermediate->memory());
-			_kernel_tonemap->setArgument(1, _final_color->memory());
+			_kernel_tonemap->setArguments(
+				_accum_color_intermediate->memory(),
+				_final_color->memory()
+			);
 			_kernel_tonemap->launch(_finalize_queue->queue(), 0, N);
 			auto read_event = _final_color->enqueue_read(_finalize_queue->queue());
 			
@@ -844,7 +877,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_normal;
 
 		// Inspect internal buffer
-		std::unique_ptr<PeriodicReadableBuffer<RGBA8ValueType>> _inspect_normal;
+		std::unique_ptr<PeriodicReadableBuffer<RGBA8ValueType>> _aov_normal_rgb8;
 
 		// Mutex 
 		std::unique_ptr<OpenCLBuffer<int32_t>> _intermediate_mutex;

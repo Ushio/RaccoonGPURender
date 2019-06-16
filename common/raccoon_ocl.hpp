@@ -770,10 +770,24 @@ namespace rt {
 		}
 
 		template <class T>
-		void setArgument(int i, T value) {
+		void setArgument(int i, const T &value) {
 			cl_int status = clSetKernelArg(_kernel.get(), i, sizeof(value), &value);
 			REQUIRE_OR_EXCEPTION(status == CL_SUCCESS, "clSetKernelArg() failed");
 		}
+		template <class... Xs>
+		void setArguments(const Xs&... xs) {
+			setArgumentsAt(0, xs...);
+		}
+	private:
+		void setArgumentsAt(int i) {
+			// NOP
+		}
+		template <class X, class... Xs>
+		void setArgumentsAt(int i, const X &x, const Xs&... xs) {
+			setArgument(i, x);
+			setArgumentsAt(i + 1, xs...);
+		}
+	public:
 
 		std::shared_ptr<OpenCLEvent> launch(cl_command_queue queue, uint32_t offset, uint32_t length, OpenCLEventList event_list = OpenCLEventList()) {
 			size_t global_work_offset[] = { offset };

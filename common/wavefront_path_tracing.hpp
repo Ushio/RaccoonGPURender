@@ -130,8 +130,8 @@ namespace rt {
 			to_vec3(camera.eye) + to_vec3(camera.forward) * camera.focusDistance
 			+ to_vec3(camera.left) * camera.objectPlaneWidth * 0.5f
 			+ to_vec3(camera.up)   * camera.objectPlaneHeight * 0.5f;
-		c.imageplane_r = to_vec3(camera.right) * camera.objectPlaneWidth  / camera.resolution_x;
-		c.imageplane_b = to_vec3(camera.down)  * camera.objectPlaneHeight / camera.resolution_y;
+		c.imageplane_r = to_vec3(camera.right) * camera.objectPlaneWidth  / (float)camera.resolution_x;
+		c.imageplane_b = to_vec3(camera.down)  * camera.objectPlaneHeight / (float)camera.resolution_y;
 		return c;
 	}
 
@@ -964,7 +964,7 @@ namespace rt {
 			//	wavefront_lane->initialize(i);
 			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			//}
-			for (int i = 0; i < 2; ++i) {
+			for (int i = 0; i < 1; ++i) {
 				auto lane = context->lane(i);
 				if (lane.is_gpu == false) {
 					continue;
@@ -1054,7 +1054,9 @@ namespace rt {
 				}
 				lanes = new_lanes;
 			}
-
+			if (is_updated_intermediate[0] == false) {
+				_wavefront_lanes[0]->update_intermediate();
+			}
 			auto final_color = _wavefront_lanes[0]->finalize_color();
 
 			int w = _camera->resolution_x;

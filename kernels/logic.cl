@@ -79,6 +79,10 @@ __kernel void logic(
         newPath = true;
     }
 
+    // if(10 < logic_i) {
+    //     newPath = true;
+    // }
+
     // No Contribution
     if(luminanceT < 1.0e-5f) {
         newPath = true;

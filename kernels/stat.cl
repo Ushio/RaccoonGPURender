@@ -5,6 +5,10 @@
 
 __kernel void stat(__global RGB32AccumulationValueType *buffer, __global uint *all_sample_count) {
     size_t i = get_global_id(0);
+    // Test Left Top Pixel
+    // if(i == 0) {
+    //     *all_sample_count = (uint)buffer[i].sampleCount;
+    // }
 
     // Naive add
     // uint sample_count = (uint)buffer[i].sampleCount;

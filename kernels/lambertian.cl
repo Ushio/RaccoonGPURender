@@ -121,8 +121,24 @@ __kernel void lambertian(
     }
     float pdf = pdf_brdf * lambertian_probability + pdf_envmap * (1.0f - lambertian_probability);
 
+    // brdf only
+    // float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
+    // float3 xaxis;
+    // float3 yaxis;
+    // float3 zaxis = Ng;
+    // get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+    // wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+    // float pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+
+    // env only
+    // wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
+    // float pdf = envmap_samples[path_index].pdf;
+
     float cosTheta = dot(wi, Ng);
-    float3 T = cosTheta < 0.0 ? (float3)(0.0) : ((lambertian.R / (float)(M_PI)) * cosTheta / pdf);
+    float3 T = (float3)(0.0f);
+    if(0.0 < cosTheta) {
+        T = lambertian.R / (float)(M_PI) * cosTheta / pdf;
+    }
 
     shading_results[path_index].Le = lambertian.Le;
     shading_results[path_index].T = T;

@@ -14,15 +14,21 @@
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
 
-#include <ppl.h>
-
 #define USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION 1
+#define USE_PPL_AT_CREATE_CONTEXT 0
 
 #if USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION
 #include <intrin.h>
 #define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); __debugbreak(); }
 #else
 #define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); throw std::runtime_error(buffer); }
+#endif
+
+#if USE_PPL_AT_CREATE_CONTEXT
+#include <ppl.h>
+#define RAC_FOR_EACH concurrency::parallel_for_each
+#else
+#define RAC_FOR_EACH std::for_each
 #endif
 
 namespace rt {
@@ -615,7 +621,8 @@ namespace rt {
 					}
 				}
 			}
-			concurrency::parallel_for_each(_deviceContexts.begin(), _deviceContexts.end(), [](DeviceContext &deviceContext) {
+
+			RAC_FOR_EACH(_deviceContexts.begin(), _deviceContexts.end(), [](DeviceContext &deviceContext) {
 				cl_int status;
 
 				cl_context context = clCreateContext(NULL, 1, &deviceContext.device_id, NULL, NULL, &status);

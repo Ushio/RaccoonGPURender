@@ -213,6 +213,7 @@ namespace houdini_alembic {
 	enum SceneObjectType {
 		SceneObjectType_PolygonMesh,
 		SceneObjectType_Point,
+		SceneObjectType_Curve,
 		SceneObjectType_Camera,
 	};
 	class SceneObject {
@@ -262,6 +263,24 @@ namespace houdini_alembic {
 		std::vector<Vector3f> P;
 
 		AttributeSpreadSheet points;
+	};
+
+	class CurveObject : public SceneObject {
+	public:
+		SceneObjectType type() const override {
+			return SceneObjectType_Curve;
+		}
+
+		struct CurvePrimitive {
+			int32_t P_beg_index = 0;
+			int32_t P_end_index = 0;
+		};
+		std::vector<CurvePrimitive> curvePrimitives;
+		std::vector<Vector3f> P;
+
+		AttributeSpreadSheet points;
+		AttributeSpreadSheet vertices;
+		AttributeSpreadSheet primitives;
 	};
 	
 	/*
@@ -320,10 +339,16 @@ namespace houdini_alembic {
 		PointObject *as_point() const {
 			return dynamic_cast<PointObject *>(_pointer.get());
 		}
+		CurveObject *as_curve() const {
+			return dynamic_cast<CurveObject *>(_pointer.get());
+		}
 		CameraObject *as_camera() const {
 			return dynamic_cast<CameraObject *>(_pointer.get());
 		}
 		SceneObject *operator->() const {
+			return _pointer.get();
+		}
+		SceneObject *get() const {
 			return _pointer.get();
 		}
 	private:
@@ -332,13 +357,39 @@ namespace houdini_alembic {
 
 	class AlembicScene {
 	public:
+		PolygonMeshObject *polygonMesh_FirstVisible() const {
+			return firstVisible<PolygonMeshObject>();
+		}
+		PointObject *point_FirstVisible() const {
+			return firstVisible<PointObject>();
+		}
+		CurveObject *curve_FirstVisible() const {
+			return firstVisible<CurveObject>();
+		}
+		CameraObject *camera_FirstVisible() const {
+			return firstVisible<CameraObject>();
+		}
 		std::vector<SceneObjectPointer> objects;
+	private:
+		template <class T>
+		T *firstVisible() const {
+			for (auto o : objects) {
+				if (o->visible == false) {
+					continue;
+				}
+				if (auto obj = dynamic_cast<T *>(o.get())) {
+					return obj;
+				}
+			}
+			return nullptr;
+		}
 	};
 
 	class AlembicStorage {
 	public:
 		bool open(const std::string &filePath, std::string &error_message);
 		bool isOpened() const;
+		void close();
 
 		// return null if failed to sample.
 		std::shared_ptr<AlembicScene> read(uint32_t index, std::string &error_message) const;

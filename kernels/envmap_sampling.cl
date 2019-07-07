@@ -212,4 +212,107 @@ __kernel void envmap_sampling(
     }
 }
 
+__kernel void sample_envmap_stage(
+    __global const WavefrontPath *wavefrontPath, 
+    __global uint4 *random_states,
+    __global const ExtensionResult *extension_results,
+    __global const uint *src_queue_item, 
+    __global const uint *src_queue_count,
+    __global IncidentSample *incident_samples,
+    
+    __global const EnvmapFragment *fragments,
+    __global const float *pdfs,
+    __global const AliasBucket *aliasBuckets,
+    __global const float *sixAxisPdfsN,
+    __global const AliasBucket *sixAxisAliasBucketsN,
+
+    uint aliasBucketsCount) {
+    uint i = get_global_id(0);
+
+    if(*src_queue_count <= i) {
+        return;
+    }
+    uint index = src_queue_item[i];
+    uint4 state = random_states[index];
+
+#if SIX_AXIS_SAMPLING
+    float3 rd = wavefrontPath[index].rd;
+    float3 wo = -rd;
+    float3 n = extension_results[index].Ng;
+
+    // make 0.0 < dot(n, wo) always
+    bool backside = dot(n, wo) < 0.0f;
+    if(backside) {
+        n = -n;
+    }
+
+    int xbase = 0.0f < n.x ? aliasBucketsCount * 0 : aliasBucketsCount * 1;
+    int ybase = 0.0f < n.y ? aliasBucketsCount * 2 : aliasBucketsCount * 3;
+    int zbase = 0.0f < n.z ? aliasBucketsCount * 4 : aliasBucketsCount * 5;
+    __global const float *x_pdf = sixAxisPdfsN + xbase;
+    __global const float *y_pdf = sixAxisPdfsN + ybase;
+    __global const float *z_pdf = sixAxisPdfsN + zbase;
+
+    float u = random_uniform(&state);
+    float3 axis_prob = n * n;
+    __global const AliasBucket *aliasBucketSelected;
+    if(u < axis_prob.x) {
+        aliasBucketSelected = sixAxisAliasBucketsN + xbase;
+    } else if(u < axis_prob.x + axis_prob.y) {
+        aliasBucketSelected = sixAxisAliasBucketsN + ybase;
+    } else {
+        aliasBucketSelected = sixAxisAliasBucketsN + zbase;
+    }
+
+    uint indexFragment = alias_method(&state, aliasBucketSelected, aliasBucketsCount);
+    float pdf = 0.0f;
+    pdf += axis_prob.x * x_pdf[indexFragment];
+    pdf += axis_prob.y * y_pdf[indexFragment];
+    pdf += axis_prob.z * z_pdf[indexFragment];
+#else
+    uint indexFragment = alias_method(&state, aliasBuckets, aliasBucketsCount);
+    float pdf = pdfs[indexFragment];
+#endif
+    EnvmapFragment fragment = fragments[indexFragment];
+
+    float y   = mix(fragment.beg_y,   fragment.end_y,   random_uniform(&state));
+    float phi = mix(fragment.beg_phi, fragment.end_phi, random_uniform(&state));
+    float3 point_on_cylinder = (float3)(
+        sin(phi),
+        y,
+        cos(phi)
+    );
+    float3 wi = project_cylinder_to_sphere(point_on_cylinder);
+
+    incident_samples[index].wi = wi;
+    incident_samples[index].env_pdf = pdf;
+    
+    random_states[index] = state;
+}
+
+__kernel void evaluate_envmap_pdf_stage(
+    __global const ExtensionResult *extension_results,
+    __global const uint *src_queue_item, 
+    __global const uint *src_queue_count,
+    __global IncidentSample *incident_samples,
+    
+    __global const float *pdfs,
+    __global const float *sixAxisPdfsN,
+
+    uint width, uint height) {
+    uint i = get_global_id(0);
+
+    if(*src_queue_count <= i) {
+        return;
+    }
+    uint index = src_queue_item[i];
+    float3 Ng = extension_results[index].Ng;
+
+#if SIX_AXIS_SAMPLING
+    incident_samples[index].env_pdf = envmap_pdf_sixAxis(incident_samples[index].wi, Ng, sixAxisPdfsN, width, height);
+#else
+    incident_samples[index].env_pdf = envmap_pdf(wi, envmap_pdfs, width, height);
+#endif
+}
+
 #endif

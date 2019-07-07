@@ -41,6 +41,21 @@ typedef __attribute__ ((aligned(8))) struct {
 #define kMaterialType_Ward       4
 
 typedef struct {
+    float3 wi;
+    float bxdf_selection_p;
+    float bxdf_pdf;
+    float env_selection_p;
+    float env_pdf;
+} IncidentSample;
+
+float incidentSamplePdf(IncidentSample incidentSample) {
+    return 
+        incidentSample.bxdf_selection_p * incidentSample.bxdf_pdf +
+        incidentSample.env_selection_p * incidentSample.env_pdf;
+}
+
+
+typedef struct {
     int material_type;
     int material_index;
 } Material;

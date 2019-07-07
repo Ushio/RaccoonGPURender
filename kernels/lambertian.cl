@@ -3,7 +3,6 @@
 
 #include "types.cl"
 #include "peseudo_random.cl"
-#include "envmap_sampling.cl"
 
 // z up
 float3 cosine_weighted_hemisphere_z_up(float a, float b) {
@@ -32,34 +31,81 @@ void get_orthonormal_basis(float3 zaxis, float3 *xaxis, float3 *yaxis) {
 	*yaxis = (float3)(b, sign + zaxis.y * zaxis.y * a, -zaxis.y);
 }
 
-__kernel void lambertian(
-    __global WavefrontPath *wavefrontPath, 
+__kernel void sample_lambertian_stage(
+    __global const ExtensionResult *extension_results,
     __global uint4 *random_states,
+    __global const uint *src_queue_item, 
+    __global const uint *src_queue_count,
+    __global IncidentSample *incident_samples
+) {
+    uint gid = get_global_id(0);
+    uint count = *src_queue_count;
+    if(count <= gid) {
+        return;
+    }
+    uint item = src_queue_item[gid];
+    
+    float3 Ng = extension_results[item].Ng;
+
+    uint4 random_state = random_states[item];
+    float u0 = random_uniform(&random_state);
+    float u1 = random_uniform(&random_state);
+    random_states[item] = random_state;
+
+    float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
+    float3 xaxis;
+    float3 yaxis;
+    float3 zaxis = Ng;
+    get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+
+    float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+    
+    incident_samples[item].wi = wi;
+    incident_samples[item].bxdf_pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+}
+
+__kernel void evaluate_lambertian_pdf_stage(
+    __global const ExtensionResult *extension_results,
+    __global const uint *src_queue_item, 
+    __global const uint *src_queue_count,
+    __global IncidentSample *incident_samples
+) {
+    uint gid = get_global_id(0);
+    uint count = *src_queue_count;
+    if(count <= gid) {
+        return;
+    }
+    uint item = src_queue_item[gid];
+    
+    float3 Ng = extension_results[item].Ng;
+    float3 wi = incident_samples[item].wi;
+
+    incident_samples[item].bxdf_pdf = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
+}
+
+__kernel void lambertian_stage(
+    __global WavefrontPath *wavefrontPath, 
     __global const ExtensionResult *extension_results,
     __global ShadingResult *shading_results,
     __global const uint *lambertian_queue_item, 
     __global const uint *lambertian_queue_count,
     __global const Material *materials,
     __global const Lambertian *lambertians,
-    __global const EnvmapSample *envmap_samples,
-    __global const float *envmap_pdfs, 
-    __global const float *sixAxisPdfsN,
-    int width, int height) {
-
-    uint gid = get_global_id(0);
+    __global IncidentSample *incident_samples
+) {
+   uint gid = get_global_id(0);
     uint count = *lambertian_queue_count;
     if(count <= gid) {
         return;
     }
-    uint path_index = lambertian_queue_item[gid];
+    uint item = lambertian_queue_item[gid];
 
-    int hit_primitive_id = extension_results[path_index].hit_primitive_id;
+    int hit_primitive_id = extension_results[item].hit_primitive_id;
     Lambertian lambertian = lambertians[materials[hit_primitive_id].material_index];
 
-    float tmin = extension_results[path_index].tmin;
-    float3 Ng = extension_results[path_index].Ng;
-    float3 ro = wavefrontPath[path_index].ro;
-    float3 rd = wavefrontPath[path_index].rd;
+    float3 Ng = extension_results[item].Ng;
+    float3 ro = wavefrontPath[item].ro;
+    float3 rd = wavefrontPath[item].rd;
     float3 wo = -rd;
 
     // make 0.0 < dot(Ng, wo) always
@@ -68,66 +114,8 @@ __kernel void lambertian(
         Ng = -Ng;
     }
 
-    // Sampling Lambertian
-    // uint4 random_state = random_states[path_index];
-    // float3 wi_local = cosine_weighted_hemisphere_z_up(random_uniform(&random_state), random_uniform(&random_state));
-    // random_states[path_index] = random_state;
-    // float3 xaxis;
-    // float3 yaxis;
-    // float3 zaxis = Ng;
-    // get_orthonormal_basis(zaxis, &xaxis, &yaxis);
-    // float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
-    // float pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
-
-    // Sampling Envmap
-    // float3 wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
-    // float pdf = envmap_samples[path_index].pdf;
-
-    // Mixture Density
-    uint4 random_state = random_states[path_index];
-    float u0 = random_uniform(&random_state);
-    float u1 = random_uniform(&random_state);
-    random_states[path_index] = random_state;
-
-    float3 wi;
-    float pdf_brdf;
-    float pdf_envmap;
-
-    const float lambertian_probability = 0.5f;
-    if(u0 < lambertian_probability) {
-        u0 /= lambertian_probability;
-
-        float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
-        float3 xaxis;
-        float3 yaxis;
-        float3 zaxis = Ng;
-        get_orthonormal_basis(zaxis, &xaxis, &yaxis);
-        wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
-#if SIX_AXIS_SAMPLING
-        pdf_envmap = envmap_pdf_sixAxis(wi, Ng, sixAxisPdfsN, width, height);
-#else
-        pdf_envmap = envmap_pdf(wi, envmap_pdfs, width, height);
-#endif
-        pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
-    } else {
-        wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
-        pdf_envmap = envmap_samples[path_index].pdf;
-        pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
-    }
-    float pdf = pdf_brdf * lambertian_probability + pdf_envmap * (1.0f - lambertian_probability);
-
-    // brdf only
-    // float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
-    // float3 xaxis;
-    // float3 yaxis;
-    // float3 zaxis = Ng;
-    // get_orthonormal_basis(zaxis, &xaxis, &yaxis);
-    // wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
-    // float pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
-
-    // env only
-    // wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
-    // float pdf = envmap_samples[path_index].pdf;
+    float3 wi = incident_samples[item].wi;
+    float pdf = incidentSamplePdf(incident_samples[item]);
 
     float cosTheta = dot(wi, Ng);
     float3 T = (float3)(0.0f);
@@ -135,14 +123,129 @@ __kernel void lambertian(
         T = lambertian.R / (float)(M_PI) * cosTheta / pdf;
     }
 
-    shading_results[path_index].Le = lambertian.Le;
-    shading_results[path_index].T = T;
+    shading_results[item].Le = lambertian.Le;
+    shading_results[item].T = T;
 
+    // TODO 分離
+    float tmin = extension_results[item].tmin;
     ro = ro + rd * tmin + wi * 1.0e-5f + Ng * 1.0e-5f;
     rd = wi;
     
-    wavefrontPath[path_index].ro = ro;
-    wavefrontPath[path_index].rd = rd;
+    wavefrontPath[item].ro = ro;
+    wavefrontPath[item].rd = rd;
 }
+
+// __kernel void lambertian(
+//     __global WavefrontPath *wavefrontPath, 
+//     __global uint4 *random_states,
+//     __global const ExtensionResult *extension_results,
+//     __global ShadingResult *shading_results,
+//     __global const uint *lambertian_queue_item, 
+//     __global const uint *lambertian_queue_count,
+//     __global const Material *materials,
+//     __global const Lambertian *lambertians,
+//     __global const EnvmapSample *envmap_samples,
+//     __global const float *envmap_pdfs, 
+//     __global const float *sixAxisPdfsN,
+//     int width, int height) {
+
+//     uint gid = get_global_id(0);
+//     uint count = *lambertian_queue_count;
+//     if(count <= gid) {
+//         return;
+//     }
+//     uint path_index = lambertian_queue_item[gid];
+
+//     int hit_primitive_id = extension_results[path_index].hit_primitive_id;
+//     Lambertian lambertian = lambertians[materials[hit_primitive_id].material_index];
+
+//     float tmin = extension_results[path_index].tmin;
+//     float3 Ng = extension_results[path_index].Ng;
+//     float3 ro = wavefrontPath[path_index].ro;
+//     float3 rd = wavefrontPath[path_index].rd;
+//     float3 wo = -rd;
+
+//     // make 0.0 < dot(Ng, wo) always
+//     bool backside = dot(Ng, wo) < 0.0f;
+//     if(backside) {
+//         Ng = -Ng;
+//     }
+
+//     // Sampling Lambertian
+//     // uint4 random_state = random_states[path_index];
+//     // float3 wi_local = cosine_weighted_hemisphere_z_up(random_uniform(&random_state), random_uniform(&random_state));
+//     // random_states[path_index] = random_state;
+//     // float3 xaxis;
+//     // float3 yaxis;
+//     // float3 zaxis = Ng;
+//     // get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+//     // float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+//     // float pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+
+//     // Sampling Envmap
+//     // float3 wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
+//     // float pdf = envmap_samples[path_index].pdf;
+
+//     // Mixture Density
+//     uint4 random_state = random_states[path_index];
+//     float u0 = random_uniform(&random_state);
+//     float u1 = random_uniform(&random_state);
+//     random_states[path_index] = random_state;
+
+//     float3 wi;
+//     float pdf_brdf;
+//     float pdf_envmap;
+
+//     const float lambertian_probability = 0.5f;
+//     if(u0 < lambertian_probability) {
+//         u0 /= lambertian_probability;
+
+//         float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
+//         float3 xaxis;
+//         float3 yaxis;
+//         float3 zaxis = Ng;
+//         get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+//         wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+// #if SIX_AXIS_SAMPLING
+//         pdf_envmap = envmap_pdf_sixAxis(wi, Ng, sixAxisPdfsN, width, height);
+// #else
+//         pdf_envmap = envmap_pdf(wi, envmap_pdfs, width, height);
+// #endif
+//         pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+//     } else {
+//         wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
+//         pdf_envmap = envmap_samples[path_index].pdf;
+//         pdf_brdf = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
+//     }
+//     float pdf = pdf_brdf * lambertian_probability + pdf_envmap * (1.0f - lambertian_probability);
+
+//     // brdf only
+//     // float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
+//     // float3 xaxis;
+//     // float3 yaxis;
+//     // float3 zaxis = Ng;
+//     // get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+//     // wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+//     // float pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+
+//     // env only
+//     // wi = (float3)(envmap_samples[path_index].x, envmap_samples[path_index].y, envmap_samples[path_index].z);
+//     // float pdf = envmap_samples[path_index].pdf;
+
+//     float cosTheta = dot(wi, Ng);
+//     float3 T = (float3)(0.0f);
+//     if(0.0 < cosTheta) {
+//         T = lambertian.R / (float)(M_PI) * cosTheta / pdf;
+//     }
+
+//     shading_results[path_index].Le = lambertian.Le;
+//     shading_results[path_index].T = T;
+
+//     ro = ro + rd * tmin + wi * 1.0e-5f + Ng * 1.0e-5f;
+//     rd = wi;
+    
+//     wavefrontPath[path_index].ro = ro;
+//     wavefrontPath[path_index].rd = rd;
+// }
 
 #endif

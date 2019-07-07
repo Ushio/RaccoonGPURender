@@ -47,42 +47,13 @@ namespace rt {
 		OpenCLFloat3 Ng;
 	};
 
-	//template <class ValueType> 
-	//class TImage2D {
-	//public:
-	//	void resize(int w, int h) {
-	//		_width = w;
-	//		_height = h;
-	//		_values.clear();
-	//		_values.resize(_width * _height);
-	//	}
-
-	//	bool has_area() const {
-	//		return !_values.empty();
-	//	}
-	//	int width() const {
-	//		return _width;
-	//	}
-	//	int height() const {
-	//		return _height;
-	//	}
-	//	ValueType *data() {
-	//		return _values.data();
-	//	}
-	//	const ValueType *data() const {
-	//		return _values.data();
-	//	}
-	//	ValueType &operator()(int x, int y) {
-	//		return _values[y * _width + x];
-	//	}
-	//	const ValueType &operator()(int x, int y) const {
-	//		return _values[y * _width + x];
-	//	}
-	//private:
-	//	int _width = 0;
-	//	int _height = 0;
-	//	std::vector<ValueType> _values;
-	//};
+	struct IncidentSample {
+		OpenCLFloat3 wi;
+		float bxdf_selection_p;
+		float bxdf_pdf;
+		float env_selection_p;
+		float env_pdf;
+	};
 
 	// 32bit compornent RGB Accumlation
 	struct alignas(16) RGB32AccumulationValueType {
@@ -336,6 +307,11 @@ namespace rt {
 		void clear(cl_command_queue queue) {
 			_count->fill(0, queue);
 		}
+		uint32_t read_count_immediately(cl_command_queue queue) const {
+			uint32_t c;
+			_count->read_immediately(&c, queue);
+			return c;
+		}
 	private:
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _item;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _count;
@@ -370,14 +346,22 @@ namespace rt {
 
 			OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id);
 			_kernel_envmap_sampling = unique(new OpenCLKernel("envmap_sampling", program_envmap_sampling.program()));
+			_kernel_sample_envmap_stage = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
+			_kernel_evaluate_envmap_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_pdf_stage", program_envmap_sampling.program()));
 
 			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
-			_kernel_lambertian = unique(new OpenCLKernel("lambertian", program_lambertian.program()));
+			_kernel_sample_lambertian_stage = unique(new OpenCLKernel("sample_lambertian_stage", program_lambertian.program()));
+			_kernel_evaluate_lambertian_pdf_stage = unique(new OpenCLKernel("evaluate_lambertian_pdf_stage", program_lambertian.program()));
+			_kernel_lambertian_stage = unique(new OpenCLKernel("lambertian_stage", program_lambertian.program()));
+
 			OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id);
 			_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
 
 			OpenCLProgram program_ward("ward.cl", lane.context, lane.device_id);
 			_kernel_ward = unique(new OpenCLKernel("ward", program_ward.program()));
+
+			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
+			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
 
 			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
@@ -395,6 +379,8 @@ namespace rt {
 
 			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
+			_mem_incident_samples = unique(new OpenCLBuffer<IncidentSample>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
+
 			// envmap
 			_mem_envmap_samples = unique(new OpenCLBuffer<EnvmapSample>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
@@ -403,6 +389,9 @@ namespace rt {
 			_queue_specular = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_dierectric = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_ward = unique(new StageQueue(lane.context, _wavefrontPathCount));
+
+			_queue_bxdf_strategy = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_env_strategy  = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
@@ -479,6 +468,9 @@ namespace rt {
 			_queue_dierectric->clear(_step_queue->queue());
 			_queue_ward->clear(_step_queue->queue());
 
+			_queue_bxdf_strategy->clear(_step_queue->queue());
+			_queue_env_strategy->clear(_step_queue->queue());
+
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), _step_queue->queue());
 			_accum_normal->fill(RGB32AccumulationValueType(), _step_queue->queue());
@@ -547,29 +539,102 @@ namespace rt {
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->size());
 				_kernel_envmap_sampling->launch(_step_queue->queue(), 0, _wavefrontPathCount)->wait();
 			}
+			
+			auto mixture_selection = [&](rt::StageQueue *src_queue) {
+				_kernel_strategy_selection->setArguments(
+					_mem_random_state->memory(),
+					src_queue->item(),
+					src_queue->count(),
+					_queue_bxdf_strategy->item(),
+					_queue_bxdf_strategy->count(),
+					_queue_env_strategy->item(),
+					_queue_env_strategy->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_strategy_selection->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			};
 
+			// env (+light in the future)
+			auto sample_non_bxdf_strategy = [&]() {
+				_kernel_sample_envmap_stage->setArguments(
+					_mem_path->memory(),
+					_mem_random_state->memory(),
+					_mem_extension_results->memory(),
+					_queue_env_strategy->item(),
+					_queue_env_strategy->count(),
+					_mem_incident_samples->memory(),
+
+					_envmapBuffer->fragments->memory(),
+					_envmapBuffer->pdfs->memory(),
+					_envmapBuffer->aliasBuckets->memory(),
+					_envmapBuffer->sixAxisPdfN->memory(),
+					_envmapBuffer->sixAxisAliasBucketN->memory(),
+					_envmapBuffer->fragments->size()
+				);
+				_kernel_sample_envmap_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			};
+
+			// env (+light in the future)
+			auto evaluate_non_bxdf_pdf = [&]() {
+				_kernel_evaluate_envmap_pdf_stage->setArguments(
+					_mem_extension_results->memory(),
+					_queue_bxdf_strategy->item(),
+					_queue_bxdf_strategy->count(),
+					_mem_incident_samples->memory(),
+
+					_envmapBuffer->pdfs->memory(),
+					_envmapBuffer->sixAxisPdfN->memory(),
+					_envmapBuffer->envmap->width(),
+					_envmapBuffer->envmap->height()
+				);
+				_kernel_evaluate_envmap_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			};
 
 			if (_materialBuffer->lambertians->size() != 0) {
-				int arg = 0;
-				_kernel_lambertian->setArgument(arg++, _mem_path->memory());
-				_kernel_lambertian->setArgument(arg++, _mem_random_state->memory());
-				_kernel_lambertian->setArgument(arg++, _mem_extension_results->memory());
-				_kernel_lambertian->setArgument(arg++, _mem_shading_results->memory());
-				_kernel_lambertian->setArgument(arg++, _queue_lambertian->item());
-				_kernel_lambertian->setArgument(arg++, _queue_lambertian->count());
-				_kernel_lambertian->setArgument(arg++, _materialBuffer->materials->memory());
-				_kernel_lambertian->setArgument(arg++, _materialBuffer->lambertians->memory());
+				// selection
+				mixture_selection(_queue_lambertian.get());
 
-				// envmap simple
-				_kernel_lambertian->setArgument(arg++, _mem_envmap_samples->memory());
-				_kernel_lambertian->setArgument(arg++, _envmapBuffer->pdfs->memory());
+				// sampling common
+				sample_non_bxdf_strategy();
 
-				_kernel_lambertian->setArgument(arg++, _envmapBuffer->sixAxisPdfN->memory());
+				// sampling bsdf
+				_kernel_sample_lambertian_stage->setArguments(
+					_mem_extension_results->memory(),
+					_mem_random_state->memory(),
+					_queue_bxdf_strategy->item(),
+					_queue_bxdf_strategy->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_sample_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->width());
-				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->height());
+				// evaluate env pdf
+				evaluate_non_bxdf_pdf();
 
-				_kernel_lambertian->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+				// evaluate bxdf pdf 
+				// もし戦略が複数あれば、ここはループ
+				_kernel_evaluate_lambertian_pdf_stage->setArguments(
+					_mem_extension_results->memory(),
+					_queue_env_strategy->item(),
+					_queue_env_strategy->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_evaluate_lambertian_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// finish
+				_queue_bxdf_strategy->clear(_step_queue->queue());
+				_queue_env_strategy->clear(_step_queue->queue());
+
+				_kernel_lambertian_stage->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_mem_shading_results->memory(),
+					_queue_lambertian->item(),
+					_queue_lambertian->count(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->lambertians->memory(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 				_queue_lambertian->clear(_step_queue->queue());
 			}
@@ -824,10 +889,17 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_logic;
 
 		std::unique_ptr<OpenCLKernel> _kernel_envmap_sampling;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_envmap_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_evaluate_envmap_pdf_stage;
 
-		std::unique_ptr<OpenCLKernel> _kernel_lambertian;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_lambertian_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_evaluate_lambertian_pdf_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_lambertian_stage;
+
 		std::unique_ptr<OpenCLKernel> _kernel_delta_materials;
 		std::unique_ptr<OpenCLKernel> _kernel_ward;
+
+		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;
 
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
@@ -851,6 +923,8 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<ExtensionResult>> _mem_extension_results;
 		std::unique_ptr<OpenCLBuffer<ShadingResult>> _mem_shading_results;
 
+		std::unique_ptr<OpenCLBuffer<IncidentSample>> _mem_incident_samples;
+
 		// envmap
 		struct EnvmapSample {
 			float x, y, z;
@@ -864,6 +938,9 @@ namespace rt {
 		std::unique_ptr<StageQueue> _queue_specular;
 		std::unique_ptr<StageQueue> _queue_dierectric;
 		std::unique_ptr<StageQueue> _queue_ward;
+
+		std::unique_ptr<StageQueue> _queue_bxdf_strategy;
+		std::unique_ptr<StageQueue> _queue_env_strategy;
 
 		// Accumlation Buffer
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;

@@ -633,14 +633,6 @@ namespace rt {
 				_queue_lambertian->clear(_step_queue->queue());
 			}
 			if (_materialBuffer->wards->size() != 0) {
-				IncidentSample s;
-				s.bxdf_pdf = 0;
-				s.env_pdf = 0;
-				_mem_incident_samples->fill(
-					s,
-					_step_queue->queue()
-				);
-
 				// selection
 				mixture_selection(_queue_ward.get());
 

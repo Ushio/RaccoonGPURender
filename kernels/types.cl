@@ -54,7 +54,6 @@ float incidentSamplePdf(IncidentSample incidentSample) {
         incidentSample.env_selection_p * incidentSample.env_pdf;
 }
 
-
 typedef struct {
     int material_type;
     int material_index;

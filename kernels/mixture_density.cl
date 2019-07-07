@@ -28,14 +28,23 @@ __kernel void strategy_selection(
     float u = random_uniform(&state);
     random_states[item] = state;
 
+    const float bxdf_p = 0.5f;
     uint enqueue_index;
-    if(u < 0.5f) {
+    if(u < bxdf_p) {
         enqueue_index = 0;
     } else {
         enqueue_index = 1;
     }
-    incident_samples[item].bxdf_selection_p = 0.5f;
-    incident_samples[item].env_selection_p  = 0.5f;
+    incident_samples[item].bxdf_selection_p = bxdf_p;
+    incident_samples[item].env_selection_p  = 1.0f - bxdf_p;
+
+    // uint enqueue_index = 0;
+    // incident_samples[item].bxdf_selection_p = 1.0f;
+    // incident_samples[item].env_selection_p  = 0.0f;
+
+    // uint enqueue_index = 1;
+    // incident_samples[item].bxdf_selection_p = 0.0f;
+    // incident_samples[item].env_selection_p  = 1.0f;
 
     // Enqueue 
     __global uint *global_queue_items [NUMBER_OF_QUEUE] = {bxdf_strategy_queue_item,  env_strategy_queue_item };

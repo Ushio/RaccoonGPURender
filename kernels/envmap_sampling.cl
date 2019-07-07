@@ -122,96 +122,6 @@ float envmap_pdf_sixAxis(
     return pdf;
 }
 
-// out envmap_samples
-__kernel void envmap_sampling(
-    __global const WavefrontPath *wavefrontPath, 
-    __global uint4 *random_states,
-    __global const ExtensionResult *extension_results,
-    __global const uint *lambertian_queue_item, 
-    __global const uint *lambertian_queue_count,
-    __global const uint *ward_queue_item, 
-    __global const uint *ward_queue_count,
-
-    __global EnvmapSample *envmap_samples,
-    __global const EnvmapFragment *fragments,
-    __global const float *pdfs,
-    __global const AliasBucket *aliasBuckets,
-
-    __global const float *sixAxisPdfsN,
-    __global const AliasBucket *sixAxisAliasBucketsN,
-
-    uint aliasBucketsCount) {
-    uint i = get_global_id(0);
-
-    __global const uint *queue_items[2] = {lambertian_queue_item, ward_queue_item};
-    __global const uint *queue_counts[2] = {lambertian_queue_count, ward_queue_count};
-
-    for(int qi = 0 ; qi < 2 ; ++qi) {
-        if(*queue_counts[qi] <= i) {
-            continue;
-        }
-        uint index = queue_items[qi][i];
-        uint4 state = random_states[index];
-
-#if SIX_AXIS_SAMPLING
-        float3 rd = wavefrontPath[index].rd;
-        float3 wo = -rd;
-        float3 n = extension_results[index].Ng;
-
-        // make 0.0 < dot(n, wo) always
-        bool backside = dot(n, wo) < 0.0f;
-        if(backside) {
-            n = -n;
-        }
-
-        int xbase = 0.0f < n.x ? aliasBucketsCount * 0 : aliasBucketsCount * 1;
-        int ybase = 0.0f < n.y ? aliasBucketsCount * 2 : aliasBucketsCount * 3;
-        int zbase = 0.0f < n.z ? aliasBucketsCount * 4 : aliasBucketsCount * 5;
-        __global const float *x_pdf = sixAxisPdfsN + xbase;
-        __global const float *y_pdf = sixAxisPdfsN + ybase;
-        __global const float *z_pdf = sixAxisPdfsN + zbase;
-
-        float u = random_uniform(&state);
-        float3 axis_prob = n * n;
-        __global const AliasBucket *aliasBucketSelected;
-        if(u < axis_prob.x) {
-            aliasBucketSelected = sixAxisAliasBucketsN + xbase;
-        } else if(u < axis_prob.x + axis_prob.y) {
-            aliasBucketSelected = sixAxisAliasBucketsN + ybase;
-        } else {
-            aliasBucketSelected = sixAxisAliasBucketsN + zbase;
-        }
-
-        uint indexFragment = alias_method(&state, aliasBucketSelected, aliasBucketsCount);
-        float pdf = 0.0f;
-        pdf += axis_prob.x * x_pdf[indexFragment];
-        pdf += axis_prob.y * y_pdf[indexFragment];
-        pdf += axis_prob.z * z_pdf[indexFragment];
-#else
-        uint indexFragment = alias_method(&state, aliasBuckets, aliasBucketsCount);
-        float pdf = pdfs[indexFragment];
-#endif
-        EnvmapFragment fragment = fragments[indexFragment];
-
-        float y   = mix(fragment.beg_y,   fragment.end_y,   random_uniform(&state));
-        float phi = mix(fragment.beg_phi, fragment.end_phi, random_uniform(&state));
-        float3 point_on_cylinder = (float3)(
-            sin(phi),
-            y,
-            cos(phi)
-        );
-        float3 wi = project_cylinder_to_sphere(point_on_cylinder);
-        EnvmapSample sample;
-        sample.x = wi.x;
-        sample.y = wi.y;
-        sample.z = wi.z;
-        sample.pdf = pdf;
-        
-        envmap_samples[index] = sample;
-        random_states[index] = state;
-    }
-}
-
 __kernel void sample_envmap_stage(
     __global const WavefrontPath *wavefrontPath, 
     __global uint4 *random_states,
@@ -311,7 +221,7 @@ __kernel void evaluate_envmap_pdf_stage(
 #if SIX_AXIS_SAMPLING
     incident_samples[index].env_pdf = envmap_pdf_sixAxis(incident_samples[index].wi, Ng, sixAxisPdfsN, width, height);
 #else
-    incident_samples[index].env_pdf = envmap_pdf(wi, envmap_pdfs, width, height);
+    incident_samples[index].env_pdf = envmap_pdf(incident_samples[index].wi, pdfs, width, height);
 #endif
 }
 

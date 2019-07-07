@@ -99,17 +99,16 @@ float envmap_pdf(float3 wi, __global const float *pdfs, int width, int height) {
 float envmap_pdf_sixAxis(
     float3 wi,
     float3 n,
-    __global const float *sixAxisPdfs0,
-    __global const float *sixAxisPdfs1,
-    __global const float *sixAxisPdfs2,
-    __global const float *sixAxisPdfs3,
-    __global const float *sixAxisPdfs4,
-    __global const float *sixAxisPdfs5,
+    __global const float *sixAxisPdfsN,
     int width, int height) {
 
-    __global const float *x_pdf = 0.0f < n.x ? sixAxisPdfs0 : sixAxisPdfs1;
-    __global const float *y_pdf = 0.0f < n.y ? sixAxisPdfs2 : sixAxisPdfs3;
-    __global const float *z_pdf = 0.0f < n.z ? sixAxisPdfs4 : sixAxisPdfs5;
+    int aliasBucketsCount = width * height;
+    int xbase = 0.0f < n.x ? aliasBucketsCount * 0 : aliasBucketsCount * 1;
+    int ybase = 0.0f < n.y ? aliasBucketsCount * 2 : aliasBucketsCount * 3;
+    int zbase = 0.0f < n.z ? aliasBucketsCount * 4 : aliasBucketsCount * 5;
+    __global const float *x_pdf = sixAxisPdfsN + xbase;
+    __global const float *y_pdf = sixAxisPdfsN + ybase;
+    __global const float *z_pdf = sixAxisPdfsN + zbase;
 
     float3 axis_prob = n * n;
 
@@ -138,18 +137,8 @@ __kernel void envmap_sampling(
     __global const float *pdfs,
     __global const AliasBucket *aliasBuckets,
 
-    __global const float *sixAxisPdfs0,
-    __global const float *sixAxisPdfs1,
-    __global const float *sixAxisPdfs2,
-    __global const float *sixAxisPdfs3,
-    __global const float *sixAxisPdfs4,
-    __global const float *sixAxisPdfs5,
-    __global const AliasBucket *sixAxisAliasBuckets0,
-    __global const AliasBucket *sixAxisAliasBuckets1,
-    __global const AliasBucket *sixAxisAliasBuckets2,
-    __global const AliasBucket *sixAxisAliasBuckets3,
-    __global const AliasBucket *sixAxisAliasBuckets4,
-    __global const AliasBucket *sixAxisAliasBuckets5,
+    __global const float *sixAxisPdfsN,
+    __global const AliasBucket *sixAxisAliasBucketsN,
 
     uint aliasBucketsCount) {
     uint i = get_global_id(0);
@@ -175,31 +164,29 @@ __kernel void envmap_sampling(
             n = -n;
         }
 
-        __global const AliasBucket *xAliasBucket = 0.0f < n.x ? sixAxisAliasBuckets0 : sixAxisAliasBuckets1;
-        __global const AliasBucket *yAliasBucket = 0.0f < n.y ? sixAxisAliasBuckets2 : sixAxisAliasBuckets3;
-        __global const AliasBucket *zAliasBucket = 0.0f < n.z ? sixAxisAliasBuckets4 : sixAxisAliasBuckets5;
-        __global const float *x_pdf = 0.0f < n.x ? sixAxisPdfs0 : sixAxisPdfs1;
-        __global const float *y_pdf = 0.0f < n.y ? sixAxisPdfs2 : sixAxisPdfs3;
-        __global const float *z_pdf = 0.0f < n.z ? sixAxisPdfs4 : sixAxisPdfs5;
+        int xbase = 0.0f < n.x ? aliasBucketsCount * 0 : aliasBucketsCount * 1;
+        int ybase = 0.0f < n.y ? aliasBucketsCount * 2 : aliasBucketsCount * 3;
+        int zbase = 0.0f < n.z ? aliasBucketsCount * 4 : aliasBucketsCount * 5;
+        __global const float *x_pdf = sixAxisPdfsN + xbase;
+        __global const float *y_pdf = sixAxisPdfsN + ybase;
+        __global const float *z_pdf = sixAxisPdfsN + zbase;
 
         float u = random_uniform(&state);
         float3 axis_prob = n * n;
         __global const AliasBucket *aliasBucketSelected;
         if(u < axis_prob.x) {
-            aliasBucketSelected = xAliasBucket;
+            aliasBucketSelected = sixAxisAliasBucketsN + xbase;
         } else if(u < axis_prob.x + axis_prob.y) {
-            aliasBucketSelected = yAliasBucket;
+            aliasBucketSelected = sixAxisAliasBucketsN + ybase;
         } else {
-            aliasBucketSelected = zAliasBucket;
+            aliasBucketSelected = sixAxisAliasBucketsN + zbase;
         }
-        //__global const AliasBucket *aliasBucketSelected = sixAxisAliasBuckets2;
 
         uint indexFragment = alias_method(&state, aliasBucketSelected, aliasBucketsCount);
         float pdf = 0.0f;
         pdf += axis_prob.x * x_pdf[indexFragment];
         pdf += axis_prob.y * y_pdf[indexFragment];
         pdf += axis_prob.z * z_pdf[indexFragment];
-        // float pdf = sixAxisPdfs2[indexFragment];
 #else
         uint indexFragment = alias_method(&state, aliasBuckets, aliasBucketsCount);
         float pdf = pdfs[indexFragment];

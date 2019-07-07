@@ -99,12 +99,7 @@ __kernel void ward(
     __global const Ward *wards,
     __global const EnvmapSample *envmap_samples,
     __global const float *envmap_pdfs, 
-    __global const float *sixAxisPdfs0,
-    __global const float *sixAxisPdfs1,
-    __global const float *sixAxisPdfs2,
-    __global const float *sixAxisPdfs3,
-    __global const float *sixAxisPdfs4,
-    __global const float *sixAxisPdfs5,
+    __global const float *sixAxisPdfsN,
     int width, int height) {
 
     uint gid = get_global_id(0);
@@ -149,7 +144,7 @@ __kernel void ward(
 
         wi = sample_ward(wo, Ng, ward.alpha, u0, u1);
 #if SIX_AXIS_SAMPLING
-        pdf_envmap = envmap_pdf_sixAxis(wi, Ng, sixAxisPdfs0, sixAxisPdfs1, sixAxisPdfs2, sixAxisPdfs3, sixAxisPdfs4, sixAxisPdfs5, width, height);
+        pdf_envmap = envmap_pdf_sixAxis(wi, Ng, sixAxisPdfsN, width, height);
 #else
         pdf_envmap = envmap_pdf(wi, envmap_pdfs, width, height);
 #endif

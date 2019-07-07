@@ -126,6 +126,9 @@ namespace rt {
 	static const char *kPLATFORM_NAME_INTEL = u8"Intel(R) OpenCL";
 	static const char *kPLATFORM_NAME_AMD = u8"AMD Accelerated Parallel Processing";
 	
+	template <class T>
+	using ocl_shared_ptr = std::shared_ptr<typename std::remove_pointer<T>::type>;
+
 	inline cl_int opencl_platform_info(std::string &info_string, cl_platform_id platform_id, cl_platform_info info) {
 		size_t length;
 		cl_int status = clGetPlatformInfo(platform_id, info, 0, nullptr, &length);
@@ -202,7 +205,7 @@ namespace rt {
 			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");
 		}
 	private:
-		std::shared_ptr<std::remove_pointer<cl_event>::type> _event;
+		ocl_shared_ptr<cl_event> _event;
 	};
 
 	class OpenCLCustomEvent {
@@ -230,7 +233,7 @@ namespace rt {
 		}
 
 	private:
-		std::shared_ptr<std::remove_pointer<cl_event>::type> _custom_event;
+		ocl_shared_ptr<cl_event> _custom_event;
 	};
 
 	inline std::shared_ptr<OpenCLEvent> enqueue_marker(cl_command_queue queue) {
@@ -320,7 +323,7 @@ namespace rt {
 		OpenCLPinnedBufferMode _mode;
 		cl_context _context;
 		cl_command_queue _queue;
-		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
+		ocl_shared_ptr<cl_mem> _memory;
 		uint32_t _length = 0;
 		T *_ptr = nullptr;
 	};
@@ -445,7 +448,7 @@ namespace rt {
 
 	private:
 		cl_context _context;
-		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
+		ocl_shared_ptr<cl_mem> _memory;
 		uint32_t _length = 0;
 	};
 
@@ -477,7 +480,7 @@ namespace rt {
 	private:
 		int _width;
 		int _height;
-		std::shared_ptr<std::remove_pointer<cl_mem>::type> _memory;
+		ocl_shared_ptr<cl_mem> _memory;
 	};
 
 	class OpenCLLane {
@@ -629,14 +632,14 @@ namespace rt {
 				if (status != CL_SUCCESS) {
 					return;
 				}
-				deviceContext.context = std::shared_ptr<std::remove_pointer<cl_context>::type>(context, clReleaseContext);
+				deviceContext.context = ocl_shared_ptr<cl_context>(context, clReleaseContext);
 
 				// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
 				cl_command_queue queue = clCreateCommandQueue(context, deviceContext.device_id, CL_QUEUE_PROFILING_ENABLE, &status);
 				if (status != CL_SUCCESS) {
 					return;
 				}
-				deviceContext.queue = std::shared_ptr<std::remove_pointer<cl_command_queue>::type>(queue, clReleaseCommandQueue);
+				deviceContext.queue = ocl_shared_ptr<cl_command_queue>(queue, clReleaseCommandQueue);
 			});
 
 			std::map<std::string, int> priority = {
@@ -681,8 +684,8 @@ namespace rt {
 			PlatformInfo platform_info;
 			DeviceInfo device_info;
 			cl_device_id device_id = nullptr;
-			std::shared_ptr<std::remove_pointer<cl_context>::type> context;
-			std::shared_ptr<std::remove_pointer<cl_command_queue>::type> queue;
+			ocl_shared_ptr<cl_context> context;
+			ocl_shared_ptr<cl_command_queue> queue;
 		};
 		std::vector<DeviceContext> _deviceContexts;
 	};
@@ -809,7 +812,7 @@ namespace rt {
 			return std::shared_ptr<OpenCLEvent>(new OpenCLEvent(kernel_event));
 		}
 	private:
-		std::shared_ptr<std::remove_pointer<cl_kernel>::type> _kernel;
+		ocl_shared_ptr<cl_kernel> _kernel;
 	};
 
 	class OpenCLProgram {
@@ -857,7 +860,7 @@ namespace rt {
 	private:
 		cl_context _context;
 		cl_device_id _device_id;
-		std::shared_ptr<std::remove_pointer<cl_program>::type> _program;
+		ocl_shared_ptr<cl_program> _program;
 	};
 }
 

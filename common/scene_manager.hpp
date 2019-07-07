@@ -180,8 +180,8 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<EnvmapFragment>> fragments;
 		std::unique_ptr<OpenCLBuffer<AliasBucket>> aliasBuckets;
 
-		std::unique_ptr<OpenCLBuffer<float>> sixAxisPdfs[6];
-		std::unique_ptr<OpenCLBuffer<AliasBucket>> sixAxisAliasBuckets[6];
+		std::unique_ptr<OpenCLBuffer<float>> sixAxisPdfN;
+		std::unique_ptr<OpenCLBuffer<AliasBucket>> sixAxisAliasBucketN;
 	};
 
 	class SceneManager {
@@ -358,43 +358,46 @@ namespace rt {
 			std::unique_ptr<EnvmapBuffer> buffer(new EnvmapBuffer());
 			buffer->envmap = std::unique_ptr<OpenCLImage>(new OpenCLImage(context, _envmapImage->data(), _envmapImage->width(), _envmapImage->height()));
 			
-			int n = _imageEnvmap->_pdf.size();
-			std::vector<float> pdfs(n);
-			for (int i = 0; i < n; ++i) {
+			int nPixels = _imageEnvmap->_pdf.size();
+			std::vector<float> pdfs(nPixels);
+			for (int i = 0; i < nPixels; ++i) {
 				pdfs[i] = _imageEnvmap->_pdf[i];
 			}
-			buffer->pdfs = std::unique_ptr<OpenCLBuffer<float>>(new OpenCLBuffer<float>(context, pdfs.data(), n, OpenCLKernelBufferMode::ReadOnly));
+			buffer->pdfs = std::unique_ptr<OpenCLBuffer<float>>(new OpenCLBuffer<float>(context, pdfs.data(), pdfs.size(), OpenCLKernelBufferMode::ReadOnly));
 			
-			std::vector<EnvmapFragment> fragments(n);
-			for (int i = 0; i < n; ++i) {
+			std::vector<EnvmapFragment> fragments(nPixels);
+			for (int i = 0; i < nPixels; ++i) {
 				fragments[i].beg_phi = _imageEnvmap->_fragments[i].beg_phi;
 				fragments[i].end_phi = _imageEnvmap->_fragments[i].end_phi;
 				fragments[i].beg_y   = _imageEnvmap->_fragments[i].beg_y;
 				fragments[i].end_y   = _imageEnvmap->_fragments[i].end_y;
 			}
-			buffer->fragments = std::unique_ptr<OpenCLBuffer<EnvmapFragment>>(new OpenCLBuffer<EnvmapFragment>(context, fragments.data(), n, OpenCLKernelBufferMode::ReadOnly));
+			buffer->fragments = std::unique_ptr<OpenCLBuffer<EnvmapFragment>>(new OpenCLBuffer<EnvmapFragment>(context, fragments.data(), fragments.size(), OpenCLKernelBufferMode::ReadOnly));
 			
-			std::vector<AliasBucket> aliasBuckets(n);
-			for (int i = 0; i < n; ++i) {
+			std::vector<AliasBucket> aliasBuckets(nPixels);
+			for (int i = 0; i < nPixels; ++i) {
 				aliasBuckets[i].height = _imageEnvmap->_aliasMethod.buckets[i].height;
 				aliasBuckets[i].alias  = _imageEnvmap->_aliasMethod.buckets[i].alias;
 			}
-			buffer->aliasBuckets = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBuckets.data(), n, OpenCLKernelBufferMode::ReadOnly));
+			buffer->aliasBuckets = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBuckets.data(), aliasBuckets.size(), OpenCLKernelBufferMode::ReadOnly));
+
+			// 6 Axis
+			std::vector<float>       pdfN        (nPixels * 6);
+			std::vector<AliasBucket> aliasBucketN(nPixels * 6);
 
 			for (int axis = 0; axis < 6; ++axis) {
-				std::vector<float> pdfs(n);
-				for (int i = 0; i < n; ++i) {
-					pdfs[i] = _sixAxisImageEnvmap[axis]->_pdf[i];
+				auto env = _sixAxisImageEnvmap[axis];
+				int base = nPixels * axis;
+				for (int i = 0; i < nPixels; ++i) {
+					pdfN[base + i] = env->_pdf[i];
 				}
-				buffer->sixAxisPdfs[axis] = std::unique_ptr<OpenCLBuffer<float>>(new OpenCLBuffer<float>(context, pdfs.data(), n, OpenCLKernelBufferMode::ReadOnly));
-
-				std::vector<AliasBucket> aliasBuckets(n);
-				for (int i = 0; i < n; ++i) {
-					aliasBuckets[i].height = _sixAxisImageEnvmap[axis]->_aliasMethod.buckets[i].height;
-					aliasBuckets[i].alias = _sixAxisImageEnvmap[axis]->_aliasMethod.buckets[i].alias;
+				for (int i = 0; i < nPixels; ++i) {
+					aliasBucketN[base + i].height = env->_aliasMethod.buckets[i].height;
+					aliasBucketN[base + i].alias  = env->_aliasMethod.buckets[i].alias;
 				}
-				buffer->sixAxisAliasBuckets[axis] = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBuckets.data(), n, OpenCLKernelBufferMode::ReadOnly));
 			}
+			buffer->sixAxisPdfN = std::unique_ptr<OpenCLBuffer<float>>(new OpenCLBuffer<float>(context, pdfN.data(), pdfN.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->sixAxisAliasBucketN = std::unique_ptr<OpenCLBuffer<AliasBucket>>(new OpenCLBuffer<AliasBucket>(context, aliasBucketN.data(), aliasBucketN.size(), OpenCLKernelBufferMode::ReadOnly));
 
 			return buffer;
 		}

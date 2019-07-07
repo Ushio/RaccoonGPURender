@@ -10,6 +10,7 @@ using namespace rt;
 OpenCLContext *context_ptr;
 WavefrontPathTracing *pt = nullptr;
 
+
 class ImageRecieverForOF {
 public:
 	ImageRecieverForOF() {
@@ -19,11 +20,20 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
-			//ofSaveImage(_imagedata, "render.png");
+
+			static int i = 0;
+			if (i++ % 10 == 0) {
+				int index = i;
+				auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
+				_thread.run([index, image]() {
+					char name[64];
+					sprintf(name, "render_%d.png", i);
+					ofSaveImage(*image, name);
+				});
+			}
 		}
 		_dirty = true;
 	}
-
 	ofImage &getImageOnMainThread() {
 		if (_dirty) {
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
@@ -36,6 +46,8 @@ private:
 	ofPixels _imagedata;
 	ofImage _image;
 	std::mutex _mutex;
+
+	rt::WorkerThread _thread;
 };
 
 ImageRecieverForOF colorReciever;

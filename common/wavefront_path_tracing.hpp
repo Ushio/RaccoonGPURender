@@ -540,13 +540,9 @@ namespace rt {
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->pdfs->memory());
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->aliasBuckets->memory());
-				
-				for (int axis = 0; axis < 6; ++axis) {
-					_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->sixAxisPdfs[axis]->memory());
-				}
-				for (int axis = 0; axis < 6; ++axis) {
-					_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->sixAxisAliasBuckets[axis]->memory());
-				}
+
+				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->sixAxisPdfN->memory());
+				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->sixAxisAliasBucketN->memory());
 
 				_kernel_envmap_sampling->setArgument(arg++, _envmapBuffer->fragments->size());
 				_kernel_envmap_sampling->launch(_step_queue->queue(), 0, _wavefrontPathCount)->wait();
@@ -568,9 +564,7 @@ namespace rt {
 				_kernel_lambertian->setArgument(arg++, _mem_envmap_samples->memory());
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->pdfs->memory());
 
-				for (int axis = 0; axis < 6; ++axis) {
-					_kernel_lambertian->setArgument(arg++, _envmapBuffer->sixAxisPdfs[axis]->memory());
-				}
+				_kernel_lambertian->setArgument(arg++, _envmapBuffer->sixAxisPdfN->memory());
 
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->width());
 				_kernel_lambertian->setArgument(arg++, _envmapBuffer->envmap->height());
@@ -594,9 +588,7 @@ namespace rt {
 				_kernel_ward->setArgument(arg++, _mem_envmap_samples->memory());
 				_kernel_ward->setArgument(arg++, _envmapBuffer->pdfs->memory());
 
-				for (int axis = 0; axis < 6; ++axis) {
-					_kernel_ward->setArgument(arg++, _envmapBuffer->sixAxisPdfs[axis]->memory());
-				}
+				_kernel_ward->setArgument(arg++, _envmapBuffer->sixAxisPdfN->memory());
 
 				_kernel_ward->setArgument(arg++, _envmapBuffer->envmap->width());
 				_kernel_ward->setArgument(arg++, _envmapBuffer->envmap->height());
@@ -1093,7 +1085,7 @@ namespace rt {
 						create_color_image();
 						// printf("create_color_image %f \n", sw.elapsed());
 					}
-					std::this_thread::sleep_for(std::chrono::milliseconds(100));
+					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
 			});
 		}

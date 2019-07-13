@@ -19,6 +19,7 @@ __kernel void new_path(
     __global const uint *queue_count, 
     __global WavefrontPath *wavefrontPath, 
     __global ShadingResult *shading_results, 
+    __global ExtensionResult *extension_results, 
     __global uint4 *random_states,
     __global const ulong *next_pixel_index,
     StandardCamera camera) {
@@ -60,6 +61,10 @@ __kernel void new_path(
 
     shading_results[path_index].Le = (float3)(0.0f);
     shading_results[path_index].T  = (float3)(1.0f);
+
+    extension_results[path_index].hit_primitive_id = -1;
+    extension_results[path_index].tmin = FLT_MAX;
+    extension_results[path_index].Ng = (float3)(0.0f);
 }
 
 __kernel void finalize_new_path(__global ulong *next_pixel_index, __global uint *new_path_queue_count) {

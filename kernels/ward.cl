@@ -108,7 +108,7 @@ __kernel void sample_ward_stage(
     float3 wi = sample_ward(wo, Ng, ward.alpha, u0, u1);
     
     incident_samples[item].wi = wi;
-    incident_samples[item].bxdf_pdf = pdf_ward(wo, wi, Ng, ward.alpha);
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_ward(wo, wi, Ng, ward.alpha);
 }
 
 __kernel void evaluate_ward_pdf_stage(
@@ -139,7 +139,7 @@ __kernel void evaluate_ward_pdf_stage(
         Ng = -Ng;
     }
     
-    incident_samples[item].bxdf_pdf = pdf_ward(wo, wi, Ng, ward.alpha);
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_ward(wo, wi, Ng, ward.alpha);
 }
 
 __kernel void ward_stage(

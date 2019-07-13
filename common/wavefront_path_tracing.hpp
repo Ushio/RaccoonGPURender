@@ -47,12 +47,12 @@ namespace rt {
 		OpenCLFloat3 Ng;
 	};
 
+	static const int kStrategy_Count = 2;
 	struct IncidentSample {
 		OpenCLFloat3 wi;
-		float bxdf_selection_p;
-		float bxdf_pdf;
-		float env_selection_p;
-		float env_pdf;
+		float selection_p[kStrategy_Count];
+		float pdf[kStrategy_Count];
+		uint32_t strategy;
 	};
 
 	// 32bit compornent RGB Accumlation
@@ -78,7 +78,6 @@ namespace rt {
 		uint8_t b;
 		uint8_t a;
 	};
-
 
 	template <class T>
 	std::unique_ptr<T> unique(T *ptr) {
@@ -312,6 +311,16 @@ namespace rt {
 			_count->read_immediately(&c, queue);
 			return c;
 		}
+		std::vector<uint32_t> read_immediately(cl_command_queue queue) const {
+			std::vector<uint32_t> q(read_count_immediately(queue));
+			uint32_t *ptr;
+			_item->map_readonly(&ptr, queue)->wait();
+			for (int i = 0; i < q.size(); ++i) {
+				q[i] = ptr[i];
+			}
+			_item->unmap(ptr, queue);
+			return q;
+		}
 	private:
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _item;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> _count;
@@ -363,6 +372,7 @@ namespace rt {
 
 			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
 			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
+			_kernel_bxdf_sample_or_eval = unique(new OpenCLKernel("bxdf_sample_or_eval", program_mixture_density.program()));
 
 			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
@@ -389,8 +399,10 @@ namespace rt {
 			_queue_dierectric = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_ward = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
-			_queue_bxdf_strategy = unique(new StageQueue(lane.context, _wavefrontPathCount));
-			_queue_env_strategy  = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_sample_env = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_eval_env_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_sample_bxdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_eval_bxdf_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
@@ -449,35 +461,34 @@ namespace rt {
 			_step_data_transfer->finish();
 			_finalize_queue->finish();
 
+			auto sq = _step_queue->queue();
+
 			_kernel_random_initialize->setArguments(
 				_mem_random_state->memory(),
 				lane_index * _wavefrontPathCount
 			);
-			_kernel_random_initialize->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			_kernel_random_initialize->launch(sq, 0, _wavefrontPathCount);
 
 			_kernel_initialize_all_as_new_path->setArguments(
 				_queue_new_path->item(),
 				_queue_new_path->count()
 			);
-			_kernel_initialize_all_as_new_path->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			_kernel_initialize_all_as_new_path->launch(sq, 0, _wavefrontPathCount);
 
 			// initialize queue state
-			_queue_lambertian->clear(_step_queue->queue());
-			_queue_specular->clear(_step_queue->queue());
-			_queue_dierectric->clear(_step_queue->queue());
-			_queue_ward->clear(_step_queue->queue());
-
-			_queue_bxdf_strategy->clear(_step_queue->queue());
-			_queue_env_strategy->clear(_step_queue->queue());
+			_queue_lambertian->clear(sq);
+			_queue_specular->clear(sq);
+			_queue_dierectric->clear(sq);
+			_queue_ward->clear(sq);
 
 			// clear buffer
-			_accum_color->fill(RGB32AccumulationValueType(), _step_queue->queue());
-			_accum_normal->fill(RGB32AccumulationValueType(), _step_queue->queue());
+			_accum_color->fill(RGB32AccumulationValueType(), sq);
+			_accum_normal->fill(RGB32AccumulationValueType(), sq);
 
 			// initialize_mutex
-			_intermediate_mutex->fill(1, _step_queue->queue());
-			_is_holding_intermediate_in_step->fill(0, _step_queue->queue());
-			_is_holding_intermediate_in_merge->fill(0, _step_queue->queue());
+			_intermediate_mutex->fill(1, sq);
+			_is_holding_intermediate_in_step->fill(0, sq);
+			_is_holding_intermediate_in_merge->fill(0, sq);
 
 			_avg_sample = 0;
 		}
@@ -504,6 +515,7 @@ namespace rt {
 					_queue_new_path->count(),
 					_mem_path->memory(),
 					_mem_shading_results->memory(),
+					_mem_extension_results->memory(),
 					_mem_random_state->memory(),
 					_mem_next_pixel_index->memory(),
 					standardCamera(_camera)
@@ -517,107 +529,143 @@ namespace rt {
 				_kernel_finalize_new_path->launch(_step_queue->queue(), 0, 1);
 			}
 
-			auto mixture_selection = [&](rt::StageQueue *src_queue) {
-				_kernel_strategy_selection->setArguments(
-					_mem_random_state->memory(),
-					src_queue->item(),
-					src_queue->count(),
-					_queue_bxdf_strategy->item(),
-					_queue_bxdf_strategy->count(),
-					_queue_env_strategy->item(),
-					_queue_env_strategy->count(),
+			// Mixture Strategy
+			_queue_sample_env->clear(_step_queue->queue());
+			_queue_eval_env_pdf->clear(_step_queue->queue());
+
+			_kernel_strategy_selection->setArguments(
+				_mem_random_state->memory(),
+				_mem_extension_results->memory(),
+				_materialBuffer->materials->memory(),
+
+				_queue_sample_env->item(),
+				_queue_sample_env->count(),
+				_queue_eval_env_pdf->item(),
+				_queue_eval_env_pdf->count(),
+
+				_mem_incident_samples->memory()
+			);
+			_kernel_strategy_selection->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+			// Sample Env
+			_kernel_sample_envmap_stage->setArguments(
+				_mem_path->memory(),
+				_mem_random_state->memory(),
+				_mem_extension_results->memory(),
+				_queue_sample_env->item(),
+				_queue_sample_env->count(),
+				_mem_incident_samples->memory(),
+
+				_envmapBuffer->fragments->memory(),
+				_envmapBuffer->pdfs->memory(),
+				_envmapBuffer->aliasBuckets->memory(),
+				_envmapBuffer->sixAxisPdfN->memory(),
+				_envmapBuffer->sixAxisAliasBucketN->memory(),
+				_envmapBuffer->fragments->size()
+			);
+			_kernel_sample_envmap_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+			// Sample BxDFs and Evaluate PDF
+			if (_materialBuffer->lambertians->size() != 0) {
+				// clear queue
+				_queue_sample_bxdf->clear(_step_queue->queue());
+				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
+
+				// sample or eval
+				_kernel_bxdf_sample_or_eval->setArguments(
+					_queue_lambertian->item(),
+					_queue_lambertian->count(),
+
+					_queue_sample_bxdf->item(),
+					_queue_sample_bxdf->count(),
+					_queue_eval_bxdf_pdf->item(),
+					_queue_eval_bxdf_pdf->count(),
+
 					_mem_incident_samples->memory()
 				);
-				_kernel_strategy_selection->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-			};
+				_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-			auto sample_non_bxdf_strategy = [&]() {
-				// Envmap Sample
-				_kernel_sample_envmap_stage->setArguments(
-					_mem_path->memory(),
-					_mem_random_state->memory(),
-					_mem_extension_results->memory(),
-					_queue_env_strategy->item(),
-					_queue_env_strategy->count(),
-					_mem_incident_samples->memory(),
-
-					_envmapBuffer->fragments->memory(),
-					_envmapBuffer->pdfs->memory(),
-					_envmapBuffer->aliasBuckets->memory(),
-					_envmapBuffer->sixAxisPdfN->memory(),
-					_envmapBuffer->sixAxisAliasBucketN->memory(),
-					_envmapBuffer->fragments->size()
-				);
-				_kernel_sample_envmap_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// TODO Light Sample
-			};
-			auto finish_strategy = [&]() {
-				_queue_bxdf_strategy->clear(_step_queue->queue());
-				_queue_env_strategy->clear(_step_queue->queue());
-			};
-
-			std::vector<rt::StageQueue *> non_bxdf_strategy_queues = {
-				_queue_env_strategy.get()
-			};
-			std::vector<rt::StageQueue *> non_env_strategy_queues = {
-				_queue_bxdf_strategy.get()
-			};
-
-			auto evaluate_non_bxdf_pdf = [&]() {
-				// env がサンプリングしていない wi の pdfを評価
-				for (auto q : non_env_strategy_queues) {
-					_kernel_evaluate_envmap_pdf_stage->setArguments(
-						_mem_extension_results->memory(),
-						q->item(),
-						q->count(),
-						_mem_incident_samples->memory(),
-
-						_envmapBuffer->pdfs->memory(),
-						_envmapBuffer->sixAxisPdfN->memory(),
-						_envmapBuffer->envmap->width(),
-						_envmapBuffer->envmap->height()
-					);
-					_kernel_evaluate_envmap_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-				}
-			};
-
-			if (_materialBuffer->lambertians->size() != 0) {
-				// selection
-				mixture_selection(_queue_lambertian.get());
-
-				// sampling common
-				sample_non_bxdf_strategy();
-
-				// sampling bsdf
+				// sample
 				_kernel_sample_lambertian_stage->setArguments(
 					_mem_extension_results->memory(),
 					_mem_random_state->memory(),
-					_queue_bxdf_strategy->item(),
-					_queue_bxdf_strategy->count(),
+					_queue_sample_bxdf->item(),
+					_queue_sample_bxdf->count(),
 					_mem_incident_samples->memory()
 				);
 				_kernel_sample_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				// -- Sampling Done -- 
+				// eval pdf
+				_kernel_evaluate_lambertian_pdf_stage->setArguments(
+					_mem_extension_results->memory(),
+					_queue_eval_bxdf_pdf->item(),
+					_queue_eval_bxdf_pdf->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_evaluate_lambertian_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
 
-				// evaluate env pdf
-				evaluate_non_bxdf_pdf();
+			if (_materialBuffer->wards->size() != 0) {
+				// clear queue
+				_queue_sample_bxdf->clear(_step_queue->queue());
+				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
 
-				// evaluate bxdf pdf 
-				for (auto q : non_bxdf_strategy_queues) {
-					_kernel_evaluate_lambertian_pdf_stage->setArguments(
-						_mem_extension_results->memory(),
-						q->item(),
-						q->count(),
-						_mem_incident_samples->memory()
-					);
-					_kernel_evaluate_lambertian_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-				}
+				// sample or eval
+				_kernel_bxdf_sample_or_eval->setArguments(
+					_queue_ward->item(),
+					_queue_ward->count(),
 
-				// finish
-				finish_strategy();
+					_queue_sample_bxdf->item(),
+					_queue_sample_bxdf->count(),
+					_queue_eval_bxdf_pdf->item(),
+					_queue_eval_bxdf_pdf->count(),
 
+					_mem_incident_samples->memory()
+				);
+				_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// sampling bxdf
+				_kernel_sample_ward_stage->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->wards->memory(),
+					_mem_random_state->memory(),
+					_queue_sample_bxdf->item(),
+					_queue_sample_bxdf->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// eval pdf
+				_kernel_evaluate_ward_pdf_stage->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->wards->memory(),
+					_queue_eval_bxdf_pdf->item(),
+					_queue_eval_bxdf_pdf->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
+
+			// Evaluate Env PDF
+			_kernel_evaluate_envmap_pdf_stage->setArguments(
+				_mem_extension_results->memory(),
+				_queue_eval_env_pdf->item(),
+				_queue_eval_env_pdf->count(),
+				_mem_incident_samples->memory(),
+
+				_envmapBuffer->pdfs->memory(),
+				_envmapBuffer->sixAxisPdfN->memory(),
+				_envmapBuffer->envmap->width(),
+				_envmapBuffer->envmap->height()
+			);
+			_kernel_evaluate_envmap_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+			// Evaluate Materials
+			if (_materialBuffer->lambertians->size() != 0) {
 				_kernel_lambertian_stage->setArguments(
 					_mem_path->memory(),
 					_mem_extension_results->memory(),
@@ -633,48 +681,7 @@ namespace rt {
 				_queue_lambertian->clear(_step_queue->queue());
 			}
 			if (_materialBuffer->wards->size() != 0) {
-				// selection
-				mixture_selection(_queue_ward.get());
-
-				// sampling common
-				sample_non_bxdf_strategy();
-
-				// sampling bsdf
-				_kernel_sample_ward_stage->setArguments(
-					_mem_path->memory(),
-					_mem_extension_results->memory(),
-					_materialBuffer->materials->memory(),
-					_materialBuffer->wards->memory(),
-					_mem_random_state->memory(),
-					_queue_bxdf_strategy->item(),
-					_queue_bxdf_strategy->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// -- Sampling Done -- 
-
-				// evaluate env pdf
-				evaluate_non_bxdf_pdf();
-
-				// evaluate bxdf pdf 
-				// もし戦略が複数あれば、ここはループ
-				for (auto q : non_bxdf_strategy_queues) {
-					_kernel_evaluate_ward_pdf_stage->setArguments(
-						_mem_path->memory(),
-						_mem_extension_results->memory(),
-						_materialBuffer->materials->memory(),
-						_materialBuffer->wards->memory(),
-						q->item(),
-						q->count(),
-						_mem_incident_samples->memory()
-					);
-					_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-				}
-
-				// finish
-				finish_strategy();
-
+				// eval
 				_kernel_ward_stage->setArguments(
 					_mem_path->memory(),
 					_mem_extension_results->memory(),
@@ -689,6 +696,64 @@ namespace rt {
 
 				_queue_ward->clear(_step_queue->queue());
 			}
+
+			//if (_materialBuffer->wards->size() != 0) {
+			//	// selection
+			//	mixture_selection(_queue_ward.get());
+
+			//	// sampling common
+			//	sample_non_bxdf_strategy();
+
+			//	// sampling bsdf
+			//	_kernel_sample_ward_stage->setArguments(
+			//		_mem_path->memory(),
+			//		_mem_extension_results->memory(),
+			//		_materialBuffer->materials->memory(),
+			//		_materialBuffer->wards->memory(),
+			//		_mem_random_state->memory(),
+			//		_queue_bxdf_strategy->item(),
+			//		_queue_bxdf_strategy->count(),
+			//		_mem_incident_samples->memory()
+			//	);
+			//	_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+			//	// -- Sampling Done -- 
+
+			//	// evaluate env pdf
+			//	evaluate_non_bxdf_pdf();
+
+			//	// evaluate bxdf pdf 
+			//	// もし戦略が複数あれば、ここはループ
+			//	for (auto q : non_bxdf_strategy_queues) {
+			//		_kernel_evaluate_ward_pdf_stage->setArguments(
+			//			_mem_path->memory(),
+			//			_mem_extension_results->memory(),
+			//			_materialBuffer->materials->memory(),
+			//			_materialBuffer->wards->memory(),
+			//			q->item(),
+			//			q->count(),
+			//			_mem_incident_samples->memory()
+			//		);
+			//		_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			//	}
+
+			//	// finish
+			//	finish_strategy();
+
+			//	_kernel_ward_stage->setArguments(
+			//		_mem_path->memory(),
+			//		_mem_extension_results->memory(),
+			//		_mem_shading_results->memory(),
+			//		_queue_ward->item(),
+			//		_queue_ward->count(),
+			//		_materialBuffer->materials->memory(),
+			//		_materialBuffer->wards->memory(),
+			//		_mem_incident_samples->memory()
+			//	);
+			//	_kernel_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+			//	_queue_ward->clear(_step_queue->queue());
+			//}
 
 			if(_materialBuffer->speculars->size() != 0 && _materialBuffer->dierectrics->size() != 0) {
 				_kernel_delta_materials->setArguments(
@@ -929,6 +994,7 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_ward_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;
+		std::unique_ptr<OpenCLKernel> _kernel_bxdf_sample_or_eval;
 
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
@@ -961,8 +1027,11 @@ namespace rt {
 		std::unique_ptr<StageQueue> _queue_dierectric;
 		std::unique_ptr<StageQueue> _queue_ward;
 
-		std::unique_ptr<StageQueue> _queue_bxdf_strategy;
-		std::unique_ptr<StageQueue> _queue_env_strategy;
+		std::unique_ptr<StageQueue> _queue_sample_env;
+		std::unique_ptr<StageQueue> _queue_eval_env_pdf;
+
+		std::unique_ptr<StageQueue> _queue_sample_bxdf;
+		std::unique_ptr<StageQueue> _queue_eval_bxdf_pdf;
 
 		// Accumlation Buffer
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;

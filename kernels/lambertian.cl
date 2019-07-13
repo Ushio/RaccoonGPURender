@@ -61,7 +61,7 @@ __kernel void sample_lambertian_stage(
     float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
     
     incident_samples[item].wi = wi;
-    incident_samples[item].bxdf_pdf = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
 }
 
 __kernel void evaluate_lambertian_pdf_stage(
@@ -80,7 +80,7 @@ __kernel void evaluate_lambertian_pdf_stage(
     float3 Ng = extension_results[item].Ng;
     float3 wi = incident_samples[item].wi;
 
-    incident_samples[item].bxdf_pdf = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
 }
 
 __kernel void lambertian_stage(

@@ -163,7 +163,9 @@ __kernel void logic(
 
     if(get_local_id(0) == 0) {
         for(int i = 0 ; i < NUMBER_OF_QUEUE ; ++i) {
-            local_queue_offsets[i] = atomic_add(global_queue_counts[i], local_queue_counts[i]);
+            if(0 <= local_queue_counts[i]) {
+                local_queue_offsets[i] = atomic_add(global_queue_counts[i], local_queue_counts[i]);
+            }
         }
     }
 

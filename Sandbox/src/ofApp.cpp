@@ -21,16 +21,16 @@ public:
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
 
-			static int i = 0;
-			if (i++ % 10 == 0) {
-				int index = i;
-				auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
-				_thread.run([index, image]() {
-					char name[64];
-					sprintf(name, "render_%d.png", i);
-					ofSaveImage(*image, name);
-				});
-			}
+			//static int i = 0;
+			//if (i++ % 10 == 0) {
+			//	int index = i;
+			//	auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
+			//	_thread.run([index, image]() {
+			//		char name[64];
+			//		sprintf(name, "render_%d.png", i);
+			//		ofSaveImage(*image, name);
+			//	});
+			//}
 		}
 		_dirty = true;
 	}

@@ -195,7 +195,7 @@ __kernel void sample_envmap_stage(
     float3 wi = project_cylinder_to_sphere(point_on_cylinder);
 
     incident_samples[index].wi = wi;
-    incident_samples[index].env_pdf = pdf;
+    incident_samples[index].pdfs[kStrategy_Env] = pdf;
     
     random_states[index] = state;
 }
@@ -219,9 +219,9 @@ __kernel void evaluate_envmap_pdf_stage(
     float3 Ng = extension_results[index].Ng;
 
 #if SIX_AXIS_SAMPLING
-    incident_samples[index].env_pdf = envmap_pdf_sixAxis(incident_samples[index].wi, Ng, sixAxisPdfsN, width, height);
+    incident_samples[index].pdfs[kStrategy_Env] = envmap_pdf_sixAxis(incident_samples[index].wi, Ng, sixAxisPdfsN, width, height);
 #else
-    incident_samples[index].env_pdf = envmap_pdf(incident_samples[index].wi, pdfs, width, height);
+    incident_samples[index].pdfs[kStrategy_Env] = envmap_pdf(incident_samples[index].wi, pdfs, width, height);
 #endif
 }
 

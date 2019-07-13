@@ -697,64 +697,6 @@ namespace rt {
 				_queue_ward->clear(_step_queue->queue());
 			}
 
-			//if (_materialBuffer->wards->size() != 0) {
-			//	// selection
-			//	mixture_selection(_queue_ward.get());
-
-			//	// sampling common
-			//	sample_non_bxdf_strategy();
-
-			//	// sampling bsdf
-			//	_kernel_sample_ward_stage->setArguments(
-			//		_mem_path->memory(),
-			//		_mem_extension_results->memory(),
-			//		_materialBuffer->materials->memory(),
-			//		_materialBuffer->wards->memory(),
-			//		_mem_random_state->memory(),
-			//		_queue_bxdf_strategy->item(),
-			//		_queue_bxdf_strategy->count(),
-			//		_mem_incident_samples->memory()
-			//	);
-			//	_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-			//	// -- Sampling Done -- 
-
-			//	// evaluate env pdf
-			//	evaluate_non_bxdf_pdf();
-
-			//	// evaluate bxdf pdf 
-			//	// もし戦略が複数あれば、ここはループ
-			//	for (auto q : non_bxdf_strategy_queues) {
-			//		_kernel_evaluate_ward_pdf_stage->setArguments(
-			//			_mem_path->memory(),
-			//			_mem_extension_results->memory(),
-			//			_materialBuffer->materials->memory(),
-			//			_materialBuffer->wards->memory(),
-			//			q->item(),
-			//			q->count(),
-			//			_mem_incident_samples->memory()
-			//		);
-			//		_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-			//	}
-
-			//	// finish
-			//	finish_strategy();
-
-			//	_kernel_ward_stage->setArguments(
-			//		_mem_path->memory(),
-			//		_mem_extension_results->memory(),
-			//		_mem_shading_results->memory(),
-			//		_queue_ward->item(),
-			//		_queue_ward->count(),
-			//		_materialBuffer->materials->memory(),
-			//		_materialBuffer->wards->memory(),
-			//		_mem_incident_samples->memory()
-			//	);
-			//	_kernel_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-			//	_queue_ward->clear(_step_queue->queue());
-			//}
-
 			if(_materialBuffer->speculars->size() != 0 && _materialBuffer->dierectrics->size() != 0) {
 				_kernel_delta_materials->setArguments(
 					_mem_path->memory(),

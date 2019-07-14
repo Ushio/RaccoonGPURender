@@ -56,6 +56,8 @@ ImageRecieverForOF normalReciever;
 //--------------------------------------------------------------
 void ofApp::setup() {
 	ofSetVerticalSync(false);
+	ofSetFrameRate(30);
+
 	ofEnableArbTex();
 
 	ofxRaccoonImGui::initialize();

@@ -565,8 +565,8 @@ namespace rt {
 			);
 			_kernel_sample_envmap_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-			// Sample BxDFs and Evaluate PDF
-			if (_materialBuffer->lambertians->size() != 0) {
+			// Sampling and Eval Pdf Lambertian
+			{
 				// clear queue
 				_queue_sample_bxdf->clear(_step_queue->queue());
 				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
@@ -605,7 +605,8 @@ namespace rt {
 				_kernel_evaluate_lambertian_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
-			if (_materialBuffer->wards->size() != 0) {
+			// Sampling and Eval Pdf Ward
+			{
 				// clear queue
 				_queue_sample_bxdf->clear(_step_queue->queue());
 				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
@@ -664,8 +665,8 @@ namespace rt {
 			);
 			_kernel_evaluate_envmap_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-			// Evaluate Materials
-			if (_materialBuffer->lambertians->size() != 0) {
+			// Evaluate Materials Lambertian
+			{
 				_kernel_lambertian_stage->setArguments(
 					_mem_path->memory(),
 					_mem_extension_results->memory(),
@@ -680,7 +681,9 @@ namespace rt {
 
 				_queue_lambertian->clear(_step_queue->queue());
 			}
-			if (_materialBuffer->wards->size() != 0) {
+			
+			// Evaluate Materials Ward
+			{
 				// eval
 				_kernel_ward_stage->setArguments(
 					_mem_path->memory(),
@@ -697,7 +700,8 @@ namespace rt {
 				_queue_ward->clear(_step_queue->queue());
 			}
 
-			if(_materialBuffer->speculars->size() != 0 && _materialBuffer->dierectrics->size() != 0) {
+			// Specular & Delta
+			{
 				_kernel_delta_materials->setArguments(
 					_mem_path->memory(),
 					_mem_random_state->memory(),

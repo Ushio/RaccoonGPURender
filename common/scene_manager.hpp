@@ -1,7 +1,11 @@
 ﻿#pragma once
 
 #include <vector>
+#include <unordered_map>
+#include <typeindex>
+
 #include <glm/glm.hpp>
+
 #include "houdini_alembic.hpp"
 #include "raccoon_ocl.hpp"
 #include "stackless_bvh.hpp"
@@ -14,49 +18,87 @@
 #define USE_WHITE_FURNANCE_ENV 0
 
 namespace rt {
+	template <class T>
+	std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, uint32_t size) {
+		if (size == 0) {
+			T one;
+			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, &one, 1, OpenCLKernelBufferMode::ReadOnly));
+		}
+		return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, data, size, OpenCLKernelBufferMode::ReadOnly));
+	}
+
 	struct MaterialStorage {
 		std::vector<Material> materials;
-		std::vector<Lambertian> lambertians;
-		std::vector<Specular>   speculars;
-		std::vector<Dierectric> dierectrics;
-		std::vector<Ward>       wards;
 		
+		class Storage {
+		public:
+			virtual ~Storage() {} 
+		};
+		template <class T>
+		class StorageT : public Storage {
+		public:
+			int size() const {
+				return (int)_elements.size();
+			}
+			void add(const T &e) {
+				_elements.emplace_back(e);
+			}
+			const T *data() const {
+				return _elements.data();
+			}
+		private:
+			std::vector<T> _elements;
+		};
+		std::unordered_map<type_index, std::shared_ptr<Storage>> _storages;
+
+		template <class T>
+		void add(const T &element, int materialType) {
+			StorageT<T> *storage = nullptr;
+			auto it = _storages.find(typeid(T));
+			if (it == _storages.end()) {
+				storage = new StorageT<T>();
+				_storages[typeid(T)] = std::shared_ptr<Storage>(storage);
+			}
+			else {
+				storage = static_cast<StorageT<T> *>(it->second.get());
+			}
+
+			int index = storage->size();
+			materials.emplace_back(Material(materialType, index));
+			storage->add(element);
+		}
+
+		template <class T>
+		std::unique_ptr<OpenCLBuffer<T>> createBuffer(cl_context context) const {
+			auto it = _storages.find(typeid(T));
+			if (it == _storages.end()) {
+				T one;
+				return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, &one, 1, OpenCLKernelBufferMode::ReadOnly));
+			}
+			auto storage = static_cast<StorageT<T> *>(it->second.get());
+			
+			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, storage->data(), storage->size(), OpenCLKernelBufferMode::ReadOnly));
+		}
+
 		void add_variant(const rttr::variant &instance) {
 			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
-				add(*instance.get_value<std::shared_ptr<Lambertian>>());
+				add(*instance.get_value<std::shared_ptr<Lambertian>>(), kMaterialType_Lambertian);
 			}
 			else if (instance.is_type<std::shared_ptr<Specular>>()) {
-				add(*instance.get_value<std::shared_ptr<Specular>>());
+				add(*instance.get_value<std::shared_ptr<Specular>>(), kMaterialType_Specular);
 			}
 			else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
-				add(*instance.get_value<std::shared_ptr<Dierectric>>());
+				add(*instance.get_value<std::shared_ptr<Dierectric>>(), kMaterialType_Dierectric);
 			}
 			else if (instance.is_type<std::shared_ptr<Ward>>()) {
-				add(*instance.get_value<std::shared_ptr<Ward>>());
+				add(*instance.get_value<std::shared_ptr<Ward>>(), kMaterialType_Ward);
+			}
+			else if (instance.is_type<std::shared_ptr<HomogeneousMedium>>()) {
+				add(*instance.get_value<std::shared_ptr<HomogeneousMedium>>(), kMaterialType_HomogeneousMedium);
 			}
 			else {
 				RT_ASSERT(0);
 			}
-		}
-		void add(const Lambertian &lambertian) {
-			int index = (int)lambertians.size();
-			materials.emplace_back(Material(kMaterialType_Lambertian, index));
-			lambertians.emplace_back(lambertian);
-		}
-		void add(const Specular &specular) {
-			int index = (int)speculars.size();
-			materials.emplace_back(Material(kMaterialType_Specular, index));
-			speculars.emplace_back(specular);
-		}
-		void add(const Dierectric &dierectric) {
-			int index = (int)dierectrics.size();
-			materials.emplace_back(Material(kMaterialType_Dierectric, index));
-			dierectrics.emplace_back(dierectric);
-		}
-		void add(const Ward &ward) {
-			int index = (int)wards.size();
-			materials.emplace_back(Material(kMaterialType_Ward, index));
-			wards.emplace_back(ward);
 		}
 	};
 
@@ -74,7 +116,7 @@ namespace rt {
 		auto material_string = p->primitives.column_as_string("material");
 		if (material_string == nullptr) {
 			for (uint32_t i = 0, n = p->indices.size() / 3; i < n; ++i) {
-				storage->add(fallback_material());
+				storage->add(fallback_material(), kMaterialType_Lambertian);
 			}
 			return;
 		}
@@ -88,7 +130,7 @@ namespace rt {
 
 			// fallback
 			if (t.is_valid() == false) {
-				storage->add(fallback_material());
+				storage->add(fallback_material(), kMaterialType_Lambertian);
 				continue;
 			}
 			// std::cout << t.get_name();
@@ -155,10 +197,12 @@ namespace rt {
 	class MaterialBuffer {
 	public:
 		std::unique_ptr<OpenCLBuffer<Material>> materials;
-		std::unique_ptr<OpenCLBuffer<Lambertian>> lambertians;
-		std::unique_ptr<OpenCLBuffer<Specular>>   speculars;
-		std::unique_ptr<OpenCLBuffer<Dierectric>> dierectrics;
-		std::unique_ptr<OpenCLBuffer<Ward>>       wards;
+
+		std::unique_ptr<OpenCLBuffer<Lambertian>>        lambertians;
+		std::unique_ptr<OpenCLBuffer<Specular>>          speculars;
+		std::unique_ptr<OpenCLBuffer<Dierectric>>        dierectrics;
+		std::unique_ptr<OpenCLBuffer<Ward>>              wards;
+		std::unique_ptr<OpenCLBuffer<HomogeneousMedium>> homogeneousMediums;
 	};
 
 	struct EnvmapFragment {
@@ -335,22 +379,14 @@ namespace rt {
 			return buffer;
 		}
 
-		template <class T>
-		std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, uint32_t size) const {
-			if (size == 0) {
-				T one;
-				return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, &one, 1, OpenCLKernelBufferMode::ReadOnly));
-			}
-			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, data, size, OpenCLKernelBufferMode::ReadOnly));
-		}
-
 		std::unique_ptr<MaterialBuffer> createMaterialBuffer(cl_context context) const {
 			std::unique_ptr<MaterialBuffer> buffer(new MaterialBuffer());
-			buffer->materials = createBufferSafe(context, _material_storage->materials.data(), _material_storage->materials.size());
-			buffer->lambertians = createBufferSafe(context, _material_storage->lambertians.data(), _material_storage->lambertians.size());
-			buffer->speculars = createBufferSafe(context, _material_storage->speculars.data(), _material_storage->speculars.size());
-			buffer->dierectrics = createBufferSafe(context, _material_storage->dierectrics.data(), _material_storage->dierectrics.size());
-			buffer->wards = createBufferSafe(context, _material_storage->wards.data(), _material_storage->wards.size());
+			buffer->materials          = createBufferSafe(context, _material_storage->materials.data(), _material_storage->materials.size());
+			buffer->lambertians        = _material_storage->createBuffer<Lambertian>(context);
+			buffer->speculars          = _material_storage->createBuffer<Specular>(context);
+			buffer->dierectrics        = _material_storage->createBuffer<Dierectric>(context);
+			buffer->wards              = _material_storage->createBuffer<Ward>(context);
+			buffer->homogeneousMediums = _material_storage->createBuffer<HomogeneousMedium>(context);
 			return buffer;
 		}
 

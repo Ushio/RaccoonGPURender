@@ -11,10 +11,11 @@ namespace rt {
 	};
 	static const std::string kGeoScopeKey = "GeoScope";
 
-	static const int kMaterialType_Lambertian = 1;
-	static const int kMaterialType_Specular   = 2;
-	static const int kMaterialType_Dierectric = 3;
-	static const int kMaterialType_Ward       = 4;
+	static const int kMaterialType_Lambertian        = 1;
+	static const int kMaterialType_Specular          = 2;
+	static const int kMaterialType_Dierectric        = 3;
+	static const int kMaterialType_Ward              = 4;
+	static const int kMaterialType_HomogeneousMedium = 5;
 
 	struct Material {
 		int material_type = 0;
@@ -53,6 +54,12 @@ namespace rt {
 		float falloff = 0.5f;
 	};
 
+	class HomogeneousMedium {
+	public:
+		HomogeneousMedium() {}
+		float C = 1.0f;
+	};
+
 	RTTR_REGISTRATION
 	{
 		using namespace rttr;
@@ -77,5 +84,9 @@ namespace rt {
 		.property("reflectance", &Ward::reflectance)(metadata(kGeoScopeKey, GeoScope::Primitives))
 		.property("edgetint", &Ward::edgetint)(metadata(kGeoScopeKey, GeoScope::Primitives))
 		.property("falloff", &Ward::falloff)(metadata(kGeoScopeKey, GeoScope::Primitives));
+
+		registration::class_<HomogeneousMedium>("HomogeneousMedium")
+		.constructor<>()
+		.property("C", &HomogeneousMedium::C)(metadata(kGeoScopeKey, GeoScope::Primitives));
 	}
 }

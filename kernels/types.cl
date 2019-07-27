@@ -1,11 +1,12 @@
 #ifndef TYPES_CL
 #define TYPES_CL
 
-#define kMaterialType_None       0
-#define kMaterialType_Lambertian 1
-#define kMaterialType_Specular   2
-#define kMaterialType_Dierectric 3
-#define kMaterialType_Ward       4
+#define kMaterialType_None              0
+#define kMaterialType_Lambertian        1
+#define kMaterialType_Specular          2
+#define kMaterialType_Dierectric        3
+#define kMaterialType_Ward              4
+#define kMaterialType_HomogeneousMedium 5
 
 #define kStrategy_Bxdf 0
 #define kStrategy_Env  1
@@ -87,5 +88,9 @@ typedef struct {
     float3 edgetint;
     float falloff;
 } Ward;
+
+typedef struct {
+    float C;
+} HomogeneousMedium;
 
 #endif

@@ -379,7 +379,10 @@ namespace rt {
 
 			OpenCLProgram program_homogeneous_volume("homogeneous_volume.cl", lane.context, lane.device_id);
 			_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
-			_kernel_homogeneous_volume_inside_stage = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+
+			_kernel_sample_homogeneous_volume_inside_stage   = unique(new OpenCLKernel("sample_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			_kernel_evaluate_homogeneous_volume_inside_stage = unique(new OpenCLKernel("evaluate_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			_kernel_homogeneous_volume_inside_stage          = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
 
 			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
 			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
@@ -558,6 +561,11 @@ namespace rt {
 				_mem_extension_results->memory(),
 				_materialBuffer->materials->memory(),
 
+				_queue_sample_env->item(),
+				_queue_sample_env->count(),
+				_queue_eval_env_pdf->item(),
+				_queue_eval_env_pdf->count(),
+
 				_queue_sample_env_6axis->item(),
 				_queue_sample_env_6axis->count(),
 				_queue_eval_env_6axis_pdf->item(),
@@ -686,6 +694,44 @@ namespace rt {
 				_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
+			// Sampling and Eval Pdf Homogeneous Volume
+			{
+				// clear queue
+				_queue_sample_bxdf->clear(_step_queue->queue());
+				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
+
+				// sample or eval
+				_kernel_bxdf_sample_or_eval->setArguments(
+					_queue_homogeneousMediumInside->item(),
+					_queue_homogeneousMediumInside->count(),
+
+					_queue_sample_bxdf->item(),
+					_queue_sample_bxdf->count(),
+					_queue_eval_bxdf_pdf->item(),
+					_queue_eval_bxdf_pdf->count(),
+
+					_mem_incident_samples->memory()
+				);
+				_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// sample
+				_kernel_sample_homogeneous_volume_inside_stage->setArguments(
+					_mem_random_state->memory(),
+					_queue_sample_bxdf->item(),
+					_queue_sample_bxdf->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_sample_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// eval pdf
+				_kernel_evaluate_homogeneous_volume_inside_stage->setArguments(
+					_queue_eval_bxdf_pdf->item(),
+					_queue_eval_bxdf_pdf->count(),
+					_mem_incident_samples->memory()
+				);
+				_kernel_evaluate_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
+
 			// Evaluate Env PDF
 			{
 				// 6 axis
@@ -772,7 +818,8 @@ namespace rt {
 					_queue_homogeneousMediumInside->item(),
 					_queue_homogeneousMediumInside->count(),
 					_materialBuffer->materials->memory(),
-					_materialBuffer->homogeneousVolume->memory()
+					_materialBuffer->homogeneousVolume->memory(),
+					_mem_incident_samples->memory()
 				);
 				_kernel_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 				_queue_homogeneousMediumInside->clear(_step_queue->queue());
@@ -1037,6 +1084,8 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_through;
 
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_homogeneous_volume_inside_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_evaluate_homogeneous_volume_inside_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_inside_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;

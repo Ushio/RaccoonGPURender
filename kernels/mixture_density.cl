@@ -75,13 +75,20 @@ __kernel void strategy_selection(
     __global uint *sample_env_queue_count,
     __global uint *eval_env_pdf_queue_item, 
     __global uint *eval_env_pdf_queue_count,
+    
+    __global uint *sample_env_6axis_queue_item, 
+    __global uint *sample_env_6axis_queue_count,
+    __global uint *eval_env_6axis_pdf_queue_item, 
+    __global uint *eval_env_6axis_pdf_queue_count,
 
     __global IncidentSample *incident_samples
     ) {
     
     uint item = get_global_id(0);
-    int hit_primitive_id = extension_results[item].hit_primitive_id;
+    int hit_primitive_id    = extension_results[item].hit_primitive_id;
     IncidentSample sample = {};
+    
+    bool isVolume = false;
 
     if(0 <= hit_primitive_id) {
         uint material_type = materials[hit_primitive_id].material_type;
@@ -89,10 +96,18 @@ __kernel void strategy_selection(
         uint4 state = random_states[item];
         float u = random_uniform(&state);
         random_states[item] = state;
+        
+        // Check hit is volume
+        int hit_volume_material = extension_results[item].hit_volume_material;
+        if(0 <= hit_volume_material) {
+            isVolume = materials[hit_volume_material].material_type == kMaterialType_HomogeneousVolume;
+        }
 
-        // sampling probability
+        // decide sampling probability
         if( material_type == kMaterialType_Lambertian ||
-            material_type == kMaterialType_Ward       ) {
+            material_type == kMaterialType_Ward ||
+            isVolume
+            ) {
             const float bxdf_p = 0.5f;
             sample.selection_probs[kStrategy_Bxdf] = bxdf_p;
             sample.selection_probs[kStrategy_Env]  = 1.0f - bxdf_p;
@@ -113,24 +128,25 @@ __kernel void strategy_selection(
         incident_samples[item].strategy = kStrategy_None;
     }
 
-    // Enqueue 
-#define NUMBER_OF_QUEUE 2
-    __global uint *global_queue_items  [NUMBER_OF_QUEUE] = { sample_env_queue_item,  eval_env_pdf_queue_item  };
-    __global uint *global_queue_counts [NUMBER_OF_QUEUE] = { sample_env_queue_count, eval_env_pdf_queue_count };
+    // Enqueue
+#define NUMBER_OF_QUEUE 4
+    __global uint *global_queue_items  [NUMBER_OF_QUEUE] = { sample_env_queue_item,  eval_env_pdf_queue_item,  sample_env_6axis_queue_item,  eval_env_6axis_pdf_queue_item  };
+    __global uint *global_queue_counts [NUMBER_OF_QUEUE] = { sample_env_queue_count, eval_env_pdf_queue_count, sample_env_6axis_queue_count, eval_env_6axis_pdf_queue_count };
 
-    const uint sample_queue_of  [kStrategy_Count] = {-1, 0};
-    const uint eval_pdf_queue_of[kStrategy_Count] = {-1, 1};
+    // if it is volume, we must use basic envmap sampling. 
+    const uint Index_SampleEnvmap   = isVolume ? 0 : 2;
+    const uint Index_EvaluateEnvmap = isVolume ? 1 : 3;
     
     int number_of_enqueue = 0;
     int enqueues[kStrategy_Count - 1 /* no bxdf */];
     
+    /*
+    env   => this is env sample ? sample_queue_of[s] : eval_pdf_queue_of[s];
+    light => this is env sample ? sample_queue_of[s] : eval_pdf_queue_of[s];
+     */
     if(0 <= hit_primitive_id) {
-        for(int s = 1 /* bxdf skip */ ; s < kStrategy_Count ; ++s) {
-            if(sample.selection_probs[s] == 0.0f) {
-                continue;
-            }
-            // sample this strategy?
-            enqueues[number_of_enqueue] = sample.strategy == s ? sample_queue_of[s] : eval_pdf_queue_of[s];
+        if(sample.selection_probs[kStrategy_Env] != 0.0f) {
+            enqueues[number_of_enqueue] = sample.strategy == kStrategy_Env ? Index_SampleEnvmap : Index_EvaluateEnvmap;
             number_of_enqueue++;
         }
     }

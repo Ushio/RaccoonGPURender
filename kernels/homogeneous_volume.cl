@@ -103,7 +103,8 @@ __kernel void homogeneous_volume_inside_stage(
     __global uint *homogeneousVolumeInside_queue_item, 
     __global uint *homogeneousVolumeInside_queue_count,
     __global const Material *materials,
-    __global const HomogeneousVolume *homogeneousVolumes) {
+    __global const HomogeneousVolume *homogeneousVolumes,
+    __global IncidentSample *incident_samples) {
 
     uint gid = get_global_id(0);
     if(*homogeneousVolumeInside_queue_count <= gid) {
@@ -119,15 +120,11 @@ __kernel void homogeneous_volume_inside_stage(
     float tmin = extension_results[item].tmin;
     float3 ro = wavefrontPath[item].ro;
     float3 rd = wavefrontPath[item].rd;
-    float3 wo = -rd;
+    // float3 wo = -rd;
 
-    uint4 random_state = random_states[item];
-    float u0 = random_uniform(&random_state);
-    float u1 = random_uniform(&random_state);
-    random_states[item] = random_state;
-    float3 wi = uniform_on_unit_sphere(u0, u1);
+    float3 wi = incident_samples[item].wi;
+    float pdf = incidentSamplePdf(incident_samples[item]);
 
-    float pdf = pdf_uniform_on_unit_sphere();
     float3 T = volume.R / (float)(4.0f * M_PI) / pdf;
 
     shading_results[item].Le = (float3)(0.0f);

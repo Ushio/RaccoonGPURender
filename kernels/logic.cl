@@ -71,7 +71,7 @@ __kernel void logic(
 
     // Russian Roulette
     float continue_probability = 1.0f;
-    if(7 < logic_i) {
+    if(25 < logic_i) {
         continue_probability = min(luminanceT, 1.0f);
     }
     uint4 state = random_states[gid];
@@ -83,7 +83,7 @@ __kernel void logic(
         newPath = true;
     }
 
-    // if(10 < logic_i) {
+    // if(20 < logic_i) {
     //     newPath = true;
     // }
 
@@ -122,7 +122,9 @@ __kernel void logic(
     // add contribution
     if(newPath) {
         float3 L = wavefrontPath[gid].L;
-        if(all(isfinite(L))) {
+        // float kRadianceClamp = 1000.0f;
+        float kRadianceClamp = FLT_MAX;
+        if(all(isfinite(L)) && all(L < (float3)(kRadianceClamp))) {
             uint pixel_index = wavefrontPath[gid].pixel_index;
             atomic_add_global(&rgb32accum[pixel_index].r, L.x);
             atomic_add_global(&rgb32accum[pixel_index].g, L.y);

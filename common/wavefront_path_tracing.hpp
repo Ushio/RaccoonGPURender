@@ -356,8 +356,10 @@ namespace rt {
 			_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
 
 			OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id);
-			_kernel_sample_envmap_stage = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
+			_kernel_sample_envmap_stage       = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
 			_kernel_evaluate_envmap_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_pdf_stage", program_envmap_sampling.program()));
+			_kernel_sample_envmap_6axis_stage       = unique(new OpenCLKernel("sample_envmap_6axis_stage", program_envmap_sampling.program()));
+			_kernel_evaluate_envmap_6axis_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_6axis_pdf_stage", program_envmap_sampling.program()));
 
 			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
 			_kernel_sample_lambertian_stage = unique(new OpenCLKernel("sample_lambertian_stage", program_lambertian.program()));
@@ -410,8 +412,11 @@ namespace rt {
 			_queue_homogeneousMediumInside  = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_homogeneousMediumSurface = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
+			_queue_sample_env_6axis = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_eval_env_6axis_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_sample_env = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_eval_env_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
+
 			_queue_sample_bxdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_eval_bxdf_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
@@ -543,6 +548,8 @@ namespace rt {
 			}
 
 			// Mixture Strategy
+			_queue_sample_env_6axis->clear(_step_queue->queue());
+			_queue_eval_env_6axis_pdf->clear(_step_queue->queue());
 			_queue_sample_env->clear(_step_queue->queue());
 			_queue_eval_env_pdf->clear(_step_queue->queue());
 
@@ -551,32 +558,47 @@ namespace rt {
 				_mem_extension_results->memory(),
 				_materialBuffer->materials->memory(),
 
-				_queue_sample_env->item(),
-				_queue_sample_env->count(),
-				_queue_eval_env_pdf->item(),
-				_queue_eval_env_pdf->count(),
+				_queue_sample_env_6axis->item(),
+				_queue_sample_env_6axis->count(),
+				_queue_eval_env_6axis_pdf->item(),
+				_queue_eval_env_6axis_pdf->count(),
 
 				_mem_incident_samples->memory()
 			);
 			_kernel_strategy_selection->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// Sample Env
-			_kernel_sample_envmap_stage->setArguments(
-				_mem_path->memory(),
-				_mem_random_state->memory(),
-				_mem_extension_results->memory(),
-				_queue_sample_env->item(),
-				_queue_sample_env->count(),
-				_mem_incident_samples->memory(),
+			{
+				// 6axis
+				_kernel_sample_envmap_6axis_stage->setArguments(
+					_mem_path->memory(),
+					_mem_random_state->memory(),
+					_mem_extension_results->memory(),
+					_queue_sample_env_6axis->item(),
+					_queue_sample_env_6axis->count(),
+					_mem_incident_samples->memory(),
 
-				_envmapBuffer->fragments->memory(),
-				_envmapBuffer->pdfs->memory(),
-				_envmapBuffer->aliasBuckets->memory(),
-				_envmapBuffer->sixAxisPdfN->memory(),
-				_envmapBuffer->sixAxisAliasBucketN->memory(),
-				_envmapBuffer->fragments->size()
-			);
-			_kernel_sample_envmap_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+					_envmapBuffer->fragments->memory(),
+					_envmapBuffer->sixAxisPdfN->memory(),
+					_envmapBuffer->sixAxisAliasBucketN->memory(),
+					_envmapBuffer->fragments->size()
+				);
+				_kernel_sample_envmap_6axis_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// basic
+				_kernel_sample_envmap_stage->setArguments(
+					_mem_random_state->memory(),
+					_queue_sample_env->item(),
+					_queue_sample_env->count(),
+					_mem_incident_samples->memory(),
+
+					_envmapBuffer->fragments->memory(),
+					_envmapBuffer->pdfs->memory(),
+					_envmapBuffer->aliasBuckets->memory(),
+					_envmapBuffer->fragments->size()
+				);
+				_kernel_sample_envmap_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
 
 			// Sampling and Eval Pdf Lambertian
 			{
@@ -665,18 +687,32 @@ namespace rt {
 			}
 
 			// Evaluate Env PDF
-			_kernel_evaluate_envmap_pdf_stage->setArguments(
-				_mem_extension_results->memory(),
-				_queue_eval_env_pdf->item(),
-				_queue_eval_env_pdf->count(),
-				_mem_incident_samples->memory(),
+			{
+				// 6 axis
+				_kernel_evaluate_envmap_6axis_pdf_stage->setArguments(
+					_mem_extension_results->memory(),
+					_queue_eval_env_6axis_pdf->item(),
+					_queue_eval_env_6axis_pdf->count(),
+					_mem_incident_samples->memory(),
 
-				_envmapBuffer->pdfs->memory(),
-				_envmapBuffer->sixAxisPdfN->memory(),
-				_envmapBuffer->envmap->width(),
-				_envmapBuffer->envmap->height()
-			);
-			_kernel_evaluate_envmap_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+					_envmapBuffer->sixAxisPdfN->memory(),
+					_envmapBuffer->envmap->width(),
+					_envmapBuffer->envmap->height()
+				);
+				_kernel_evaluate_envmap_6axis_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				// Basic
+				_kernel_evaluate_envmap_pdf_stage->setArguments(
+					_queue_eval_env_pdf->item(),
+					_queue_eval_env_pdf->count(),
+					_mem_incident_samples->memory(),
+
+					_envmapBuffer->pdfs->memory(),
+					_envmapBuffer->envmap->width(),
+					_envmapBuffer->envmap->height()
+				);
+				_kernel_evaluate_envmap_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
 
 			// Evaluate Materials Lambertian
 			{
@@ -985,6 +1021,8 @@ namespace rt {
 
 		std::unique_ptr<OpenCLKernel> _kernel_sample_envmap_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_evaluate_envmap_pdf_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_envmap_6axis_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_evaluate_envmap_6axis_pdf_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_sample_lambertian_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_evaluate_lambertian_pdf_stage;
@@ -1038,6 +1076,8 @@ namespace rt {
 		std::unique_ptr<StageQueue> _queue_homogeneousMediumInside;
 
 		// strategy queues.
+		std::unique_ptr<StageQueue> _queue_sample_env_6axis;
+		std::unique_ptr<StageQueue> _queue_eval_env_6axis_pdf;
 		std::unique_ptr<StageQueue> _queue_sample_env;
 		std::unique_ptr<StageQueue> _queue_eval_env_pdf;
 

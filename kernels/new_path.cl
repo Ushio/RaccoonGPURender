@@ -57,6 +57,8 @@ __kernel void new_path(
     wavefrontPath[path_index].ro = camera.eye;
     wavefrontPath[path_index].rd = normalize(sample_on_objectplane - camera.eye);
 
+    wavefrontPath[path_index].volume_material = -1;
+
     random_states[path_index] = random_state;
 
     shading_results[path_index].Le = (float3)(0.0f);

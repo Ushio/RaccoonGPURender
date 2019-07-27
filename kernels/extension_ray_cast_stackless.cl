@@ -196,6 +196,7 @@ __kernel void extension_ray_cast(
 	results[gid].hit_primitive_id = hit.primitive_index;
 	results[gid].tmin = hit.tmin;
 	results[gid].Ng = Ng;
+	results[gid].hit_volume_material = -1;
 }
 
 #endif

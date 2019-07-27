@@ -24,6 +24,7 @@ namespace rt {
 		OpenCLFloat3 rd;
 		uint32_t logic_i;
 		uint32_t pixel_index;
+		int32_t volume_material;
 	};
 	struct StandardCamera {
 		OpenCLFloat3 eye;
@@ -42,7 +43,8 @@ namespace rt {
 	};
 
 	struct ExtensionResult {
-		int32_t material_id;
+		int32_t hit_primitive_id;
+		int32_t hit_volume_material;
 		float tmin;
 		OpenCLFloat3 Ng;
 	};
@@ -370,6 +372,13 @@ namespace rt {
 			_kernel_evaluate_ward_pdf_stage = unique(new OpenCLKernel("evaluate_ward_pdf_stage", program_ward.program()));
 			_kernel_ward_stage = unique(new OpenCLKernel("ward_stage", program_ward.program()));
 
+			OpenCLProgram program_homogeneous_volume_through("homogeneous_volume_through.cl", lane.context, lane.device_id);
+			_kernel_homogeneous_volume_through = unique(new OpenCLKernel("homogeneous_volume_through", program_homogeneous_volume_through.program()));
+
+			OpenCLProgram program_homogeneous_volume("homogeneous_volume.cl", lane.context, lane.device_id);
+			_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
+			_kernel_homogeneous_volume_inside_stage = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+
 			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
 			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
 			_kernel_bxdf_sample_or_eval = unique(new OpenCLKernel("bxdf_sample_or_eval", program_mixture_density.program()));
@@ -398,6 +407,8 @@ namespace rt {
 			_queue_specular = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_dierectric = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_ward = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_homogeneousMediumInside  = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			_queue_homogeneousMediumSurface = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
 			_queue_sample_env = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_eval_env_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
@@ -480,6 +491,8 @@ namespace rt {
 			_queue_specular->clear(sq);
 			_queue_dierectric->clear(sq);
 			_queue_ward->clear(sq);
+			_queue_homogeneousMediumInside->clear(sq);
+			_queue_homogeneousMediumSurface->clear(sq);
 
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), sq);
@@ -700,6 +713,35 @@ namespace rt {
 				_queue_ward->clear(_step_queue->queue());
 			}
 
+			// Volume
+			{
+				_kernel_homogeneous_volume_stage->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_mem_shading_results->memory(),
+					_queue_homogeneousMediumSurface->item(),
+					_queue_homogeneousMediumSurface->count(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->homogeneousVolume->memory()
+				);
+				_kernel_homogeneous_volume_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+				_queue_homogeneousMediumSurface->clear(_step_queue->queue());
+			}
+			{
+				_kernel_homogeneous_volume_inside_stage->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_mem_shading_results->memory(),
+					_mem_random_state->memory(),
+					_queue_homogeneousMediumInside->item(),
+					_queue_homogeneousMediumInside->count(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->homogeneousVolume->memory()
+				);
+				_kernel_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+				_queue_homogeneousMediumInside->clear(_step_queue->queue());
+			}
+
 			// Specular & Delta
 			{
 				_kernel_delta_materials->setArguments(
@@ -735,6 +777,17 @@ namespace rt {
 			}
 
 			{
+				_kernel_homogeneous_volume_through->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_mem_random_state->memory(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->homogeneousVolume->memory()
+				);
+				_kernel_homogeneous_volume_through->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
+
+			{
 				_kernel_logic->setArguments(
 					_mem_path->memory(),
 					_mem_random_state->memory(),
@@ -753,7 +806,11 @@ namespace rt {
 					_queue_dierectric->item(),
 					_queue_dierectric->count(),
 					_queue_ward->item(),
-					_queue_ward->count()
+					_queue_ward->count(),
+					_queue_homogeneousMediumSurface->item(),
+					_queue_homogeneousMediumSurface->count(),
+					_queue_homogeneousMediumInside->item(),
+					_queue_homogeneousMediumInside->count()
 				);
 				_kernel_logic->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
@@ -939,6 +996,11 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_evaluate_ward_pdf_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_ward_stage;
 
+		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_through;
+
+		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_inside_stage;
+
 		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;
 		std::unique_ptr<OpenCLKernel> _kernel_bxdf_sample_or_eval;
 
@@ -966,13 +1028,16 @@ namespace rt {
 
 		std::unique_ptr<OpenCLBuffer<IncidentSample>> _mem_incident_samples;
 
-		// queues
+		// queues. required to clear at initialize()
 		std::unique_ptr<StageQueue> _queue_new_path;
 		std::unique_ptr<StageQueue> _queue_lambertian;
 		std::unique_ptr<StageQueue> _queue_specular;
 		std::unique_ptr<StageQueue> _queue_dierectric;
 		std::unique_ptr<StageQueue> _queue_ward;
+		std::unique_ptr<StageQueue> _queue_homogeneousMediumSurface;
+		std::unique_ptr<StageQueue> _queue_homogeneousMediumInside;
 
+		// strategy queues.
 		std::unique_ptr<StageQueue> _queue_sample_env;
 		std::unique_ptr<StageQueue> _queue_eval_env_pdf;
 
@@ -1030,7 +1095,6 @@ namespace rt {
 			:_context(context)
 			,_scene(scene) {
 			SCOPED_PROFILE("WavefrontPathTracing()");
-
 			_sceneManager.setAlembicDirectory(alembicDirectory);
 
 			for (auto o : scene->objects) {
@@ -1070,6 +1134,7 @@ namespace rt {
 			//	wavefront_lane->initialize(i);
 			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
 			//}
+
 			for (int i = 0; i < 1; ++i) {
 				auto lane = context->lane(i);
 				if (lane.is_gpu == false) {

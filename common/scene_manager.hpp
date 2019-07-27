@@ -15,7 +15,7 @@
 #include "stopwatch.hpp"
 #include "timeline_profiler.hpp"
 
-#define USE_WHITE_FURNANCE_ENV 0
+#define USE_WHITE_FURNANCE_ENV 1
 
 namespace rt {
 	template <class T>
@@ -93,8 +93,8 @@ namespace rt {
 			else if (instance.is_type<std::shared_ptr<Ward>>()) {
 				add(*instance.get_value<std::shared_ptr<Ward>>(), kMaterialType_Ward);
 			}
-			else if (instance.is_type<std::shared_ptr<HomogeneousMedium>>()) {
-				add(*instance.get_value<std::shared_ptr<HomogeneousMedium>>(), kMaterialType_HomogeneousMedium);
+			else if (instance.is_type<std::shared_ptr<HomogeneousVolume>>()) {
+				add(*instance.get_value<std::shared_ptr<HomogeneousVolume>>(), kMaterialType_HomogeneousVolume);
 			}
 			else {
 				RT_ASSERT(0);
@@ -202,7 +202,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<Specular>>          speculars;
 		std::unique_ptr<OpenCLBuffer<Dierectric>>        dierectrics;
 		std::unique_ptr<OpenCLBuffer<Ward>>              wards;
-		std::unique_ptr<OpenCLBuffer<HomogeneousMedium>> homogeneousMediums;
+		std::unique_ptr<OpenCLBuffer<HomogeneousVolume>> homogeneousVolume;
 	};
 
 	struct EnvmapFragment {
@@ -386,7 +386,7 @@ namespace rt {
 			buffer->speculars          = _material_storage->createBuffer<Specular>(context);
 			buffer->dierectrics        = _material_storage->createBuffer<Dierectric>(context);
 			buffer->wards              = _material_storage->createBuffer<Ward>(context);
-			buffer->homogeneousMediums = _material_storage->createBuffer<HomogeneousMedium>(context);
+			buffer->homogeneousVolume = _material_storage->createBuffer<HomogeneousVolume>(context);
 			return buffer;
 		}
 

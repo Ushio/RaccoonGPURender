@@ -11,11 +11,12 @@ namespace rt {
 	};
 	static const std::string kGeoScopeKey = "GeoScope";
 
-	static const int kMaterialType_Lambertian        = 1;
-	static const int kMaterialType_Specular          = 2;
-	static const int kMaterialType_Dierectric        = 3;
-	static const int kMaterialType_Ward              = 4;
-	static const int kMaterialType_HomogeneousMedium = 5;
+	static const int kMaterialType_Lambertian               = 1;
+	static const int kMaterialType_Specular                 = 2;
+	static const int kMaterialType_Dierectric               = 3;
+	static const int kMaterialType_Ward                     = 4;
+	static const int kMaterialType_HomogeneousVolume        = 5;
+	static const int kMaterialType_HomogeneousVolume_Inside = 6;
 
 	struct Material {
 		int material_type = 0;
@@ -54,10 +55,11 @@ namespace rt {
 		float falloff = 0.5f;
 	};
 
-	class HomogeneousMedium {
+	class HomogeneousVolume {
 	public:
-		HomogeneousMedium() {}
+		HomogeneousVolume() {}
 		float C = 1.0f;
+		OpenCLFloat3 R = glm::vec3(1.0f);
 	};
 
 	RTTR_REGISTRATION
@@ -85,8 +87,9 @@ namespace rt {
 		.property("edgetint", &Ward::edgetint)(metadata(kGeoScopeKey, GeoScope::Primitives))
 		.property("falloff", &Ward::falloff)(metadata(kGeoScopeKey, GeoScope::Primitives));
 
-		registration::class_<HomogeneousMedium>("HomogeneousMedium")
+		registration::class_<HomogeneousVolume>("HomogeneousVolume")
 		.constructor<>()
-		.property("C", &HomogeneousMedium::C)(metadata(kGeoScopeKey, GeoScope::Primitives));
+		.property("C", &HomogeneousVolume::C)(metadata(kGeoScopeKey, GeoScope::Primitives))
+		.property("Cd", &HomogeneousVolume::R)(metadata(kGeoScopeKey, GeoScope::Primitives));
 	}
 }

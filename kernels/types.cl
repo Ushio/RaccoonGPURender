@@ -1,12 +1,13 @@
 #ifndef TYPES_CL
 #define TYPES_CL
 
-#define kMaterialType_None              0
-#define kMaterialType_Lambertian        1
-#define kMaterialType_Specular          2
-#define kMaterialType_Dierectric        3
-#define kMaterialType_Ward              4
-#define kMaterialType_HomogeneousMedium 5
+#define kMaterialType_None                    0
+#define kMaterialType_Lambertian              1
+#define kMaterialType_Specular                2
+#define kMaterialType_Dierectric              3
+#define kMaterialType_Ward                    4
+#define kMaterialType_HomogeneousVolume       5
+#define kMaterialType_HomogeneousVolumeInside 6
 
 #define kStrategy_Bxdf 0
 #define kStrategy_Env  1
@@ -21,10 +22,12 @@ typedef struct {
     float3 rd;
     uint logic_i;
     uint pixel_index;
+    int volume_material;
 } WavefrontPath;
 
 typedef struct {
     int hit_primitive_id;
+    int hit_volume_material;
     float tmin;
     float3 Ng;
 } ExtensionResult;
@@ -91,6 +94,7 @@ typedef struct {
 
 typedef struct {
     float C;
-} HomogeneousMedium;
+    float3 R;
+} HomogeneousVolume;
 
 #endif

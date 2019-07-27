@@ -59,6 +59,42 @@ __kernel void homogeneous_volume_stage(
     wavefrontPath[item].ro = ro;
 }
 
+__kernel void sample_homogeneous_volume_inside_stage(
+    __global uint4 *random_states,
+    __global const uint *src_queue_item, 
+    __global const uint *src_queue_count,
+    __global IncidentSample *incident_samples
+) {
+    uint gid = get_global_id(0);
+    uint count = *src_queue_count;
+    if(count <= gid) {
+        return;
+    }
+    uint item = src_queue_item[gid];
+
+    uint4 random_state = random_states[item];
+    float u0 = random_uniform(&random_state);
+    float u1 = random_uniform(&random_state);
+    random_states[item] = random_state;
+
+    incident_samples[item].wi = uniform_on_unit_sphere(u0, u1);
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_uniform_on_unit_sphere();
+}
+
+__kernel void evaluate_homogeneous_volume_inside_stage(
+    __global const uint *src_queue_item, 
+    __global const uint *src_queue_count,
+    __global IncidentSample *incident_samples
+) {
+    uint gid = get_global_id(0);
+    uint count = *src_queue_count;
+    if(count <= gid) {
+        return;
+    }
+    uint item = src_queue_item[gid];
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_uniform_on_unit_sphere();
+}
+
 __kernel void homogeneous_volume_inside_stage(
     __global WavefrontPath *wavefrontPath, 
     __global const ExtensionResult *extension_results,

@@ -73,7 +73,7 @@ float pdf_ward(float3 wo, float3 sampled_wi, float3 zaxis, float alpha) {
     return p;
 }
 
-__kernel void sample_ward_stage(
+__kernel void sample_or_eval_ward_stage(
     __global WavefrontPath *wavefrontPath, 
     __global const ExtensionResult *extension_results,
     __global const Material *materials,
@@ -100,45 +100,19 @@ __kernel void sample_ward_stage(
         Ng = -Ng;
     }
 
-    uint4 random_state = random_states[item];
-    float u0 = random_uniform(&random_state);
-    float u1 = random_uniform(&random_state);
-    random_states[item] = random_state;
-    
-    float3 wi = sample_ward(wo, Ng, ward.alpha, u0, u1);
+    float3 wi;
+    if(incident_samples[item].strategy == kStrategy_Bxdf) {
+        uint4 random_state = random_states[item];
+        float u0 = random_uniform(&random_state);
+        float u1 = random_uniform(&random_state);
+        random_states[item] = random_state;
+
+        wi = sample_ward(wo, Ng, ward.alpha, u0, u1);
+    } else {
+        wi = incident_samples[item].wi;
+    }
     
     incident_samples[item].wi = wi;
-    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_ward(wo, wi, Ng, ward.alpha);
-}
-
-__kernel void evaluate_ward_pdf_stage(
-    __global WavefrontPath *wavefrontPath, 
-    __global const ExtensionResult *extension_results,
-    __global const Material *materials,
-    __global const Ward *wards,
-    __global const uint *src_queue_item, 
-    __global const uint *src_queue_count,
-    __global IncidentSample *incident_samples
-) {
-    uint gid = get_global_id(0);
-    uint count = *src_queue_count;
-    if(count <= gid) {
-        return;
-    }
-    uint item = src_queue_item[gid];
-
-    int hit_primitive_id = extension_results[item].hit_primitive_id;
-    Ward ward = wards[materials[hit_primitive_id].material_index];
-    
-    float3 wi = incident_samples[item].wi;
-    float3 wo = -wavefrontPath[item].rd;
-
-    float3 Ng = extension_results[item].Ng;
-    bool backside = dot(Ng, wo) < 0.0f;
-    if(backside) {
-        Ng = -Ng;
-    }
-    
     incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_ward(wo, wi, Ng, ward.alpha);
 }
 

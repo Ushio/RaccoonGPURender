@@ -369,8 +369,7 @@ namespace rt {
 			_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
 
 			OpenCLProgram program_ward("ward.cl", lane.context, lane.device_id);
-			_kernel_sample_ward_stage = unique(new OpenCLKernel("sample_ward_stage", program_ward.program()));
-			_kernel_evaluate_ward_pdf_stage = unique(new OpenCLKernel("evaluate_ward_pdf_stage", program_ward.program()));
+			_kernel_sample_or_eval_ward_stage = unique(new OpenCLKernel("sample_or_eval_ward_stage", program_ward.program()));
 			_kernel_ward_stage = unique(new OpenCLKernel("ward_stage", program_ward.program()));
 
 			OpenCLProgram program_homogeneous_volume_through("homogeneous_volume_through.cl", lane.context, lane.device_id);
@@ -619,48 +618,60 @@ namespace rt {
 
 			// Sampling and Eval Pdf Ward
 			{
-				// clear queue
-				_queue_sample_bxdf->clear(_step_queue->queue());
-				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
-
-				// sample or eval
-				_kernel_bxdf_sample_or_eval->setArguments(
-					_queue_ward->item(),
-					_queue_ward->count(),
-
-					_queue_sample_bxdf->item(),
-					_queue_sample_bxdf->count(),
-					_queue_eval_bxdf_pdf->item(),
-					_queue_eval_bxdf_pdf->count(),
-
-					_mem_incident_samples->memory()
-				);
-				_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// sampling bxdf
-				_kernel_sample_ward_stage->setArguments(
+				_kernel_sample_or_eval_ward_stage->setArguments(
 					_mem_path->memory(),
 					_mem_extension_results->memory(),
 					_materialBuffer->materials->memory(),
 					_materialBuffer->wards->memory(),
 					_mem_random_state->memory(),
-					_queue_sample_bxdf->item(),
-					_queue_sample_bxdf->count(),
+					_queue_ward->item(),
+					_queue_ward->count(),
 					_mem_incident_samples->memory()
 				);
-				_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+				_kernel_sample_or_eval_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
-				// eval pdf
-				_kernel_evaluate_ward_pdf_stage->setArguments(
-					_mem_path->memory(),
-					_mem_extension_results->memory(),
-					_materialBuffer->materials->memory(),
-					_materialBuffer->wards->memory(),
-					_queue_eval_bxdf_pdf->item(),
-					_queue_eval_bxdf_pdf->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+				//// clear queue
+				//_queue_sample_bxdf->clear(_step_queue->queue());
+				//_queue_eval_bxdf_pdf->clear(_step_queue->queue());
+
+				//// sample or eval
+				//_kernel_bxdf_sample_or_eval->setArguments(
+				//	_queue_ward->item(),
+				//	_queue_ward->count(),
+
+				//	_queue_sample_bxdf->item(),
+				//	_queue_sample_bxdf->count(),
+				//	_queue_eval_bxdf_pdf->item(),
+				//	_queue_eval_bxdf_pdf->count(),
+
+				//	_mem_incident_samples->memory()
+				//);
+				//_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				//// sampling bxdf
+				//_kernel_sample_ward_stage->setArguments(
+				//	_mem_path->memory(),
+				//	_mem_extension_results->memory(),
+				//	_materialBuffer->materials->memory(),
+				//	_materialBuffer->wards->memory(),
+				//	_mem_random_state->memory(),
+				//	_queue_sample_bxdf->item(),
+				//	_queue_sample_bxdf->count(),
+				//	_mem_incident_samples->memory()
+				//);
+				//_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+
+				//// eval pdf
+				//_kernel_evaluate_ward_pdf_stage->setArguments(
+				//	_mem_path->memory(),
+				//	_mem_extension_results->memory(),
+				//	_materialBuffer->materials->memory(),
+				//	_materialBuffer->wards->memory(),
+				//	_queue_eval_bxdf_pdf->item(),
+				//	_queue_eval_bxdf_pdf->count(),
+				//	_mem_incident_samples->memory()
+				//);
+				//_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			// Sampling and Eval Pdf Homogeneous Volume
@@ -1045,8 +1056,7 @@ namespace rt {
 
 		std::unique_ptr<OpenCLKernel> _kernel_delta_materials;
 
-		std::unique_ptr<OpenCLKernel> _kernel_sample_ward_stage;
-		std::unique_ptr<OpenCLKernel> _kernel_evaluate_ward_pdf_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_or_eval_ward_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_ward_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_through;

@@ -40,9 +40,11 @@ __kernel void sample_or_eval_lambertian_stage(
 ) {
     uint gid = get_global_id(0);
     uint count = *src_queue_count;
+
     if(count <= gid) {
         return;
     }
+    
     uint item = src_queue_item[gid];
     float3 Ng = extension_results[item].Ng;
 

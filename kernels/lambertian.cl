@@ -31,7 +31,7 @@ void get_orthonormal_basis(float3 zaxis, float3 *xaxis, float3 *yaxis) {
 	*yaxis = (float3)(b, sign + zaxis.y * zaxis.y * a, -zaxis.y);
 }
 
-__kernel void sample_lambertian_stage(
+__kernel void sample_or_eval_lambertian_stage(
     __global const ExtensionResult *extension_results,
     __global uint4 *random_states,
     __global const uint *src_queue_item, 
@@ -44,43 +44,28 @@ __kernel void sample_lambertian_stage(
         return;
     }
     uint item = src_queue_item[gid];
-    
     float3 Ng = extension_results[item].Ng;
 
-    uint4 random_state = random_states[item];
-    float u0 = random_uniform(&random_state);
-    float u1 = random_uniform(&random_state);
-    random_states[item] = random_state;
+    float cosTheta;
+    if(incident_samples[item].strategy == kStrategy_Bxdf) {
+        uint4 random_state = random_states[item];
+        float u0 = random_uniform(&random_state);
+        float u1 = random_uniform(&random_state);
+        random_states[item] = random_state;
 
-    float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
-    float3 xaxis;
-    float3 yaxis;
-    float3 zaxis = Ng;
-    get_orthonormal_basis(zaxis, &xaxis, &yaxis);
-
-    float3 wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
-    
-    incident_samples[item].wi = wi;
-    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_cosine_weighted_hemisphere_z_up(wi_local.z);
-}
-
-__kernel void evaluate_lambertian_pdf_stage(
-    __global const ExtensionResult *extension_results,
-    __global const uint *src_queue_item, 
-    __global const uint *src_queue_count,
-    __global IncidentSample *incident_samples
-) {
-    uint gid = get_global_id(0);
-    uint count = *src_queue_count;
-    if(count <= gid) {
-        return;
+        // Sample
+        float3 wi_local = cosine_weighted_hemisphere_z_up(u0, u1);
+        float3 xaxis;
+        float3 yaxis;
+        float3 zaxis = Ng;
+        get_orthonormal_basis(zaxis, &xaxis, &yaxis);
+        incident_samples[item].wi = xaxis * wi_local.x + yaxis * wi_local.y + zaxis * wi_local.z;
+        cosTheta = wi_local.z;
+    } else {
+        float3 wi = incident_samples[item].wi;
+        cosTheta = dot(Ng, wi);
     }
-    uint item = src_queue_item[gid];
-    
-    float3 Ng = extension_results[item].Ng;
-    float3 wi = incident_samples[item].wi;
-
-    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_cosine_weighted_hemisphere_z_up(dot(Ng, wi));
+    incident_samples[item].pdfs[kStrategy_Bxdf] = pdf_cosine_weighted_hemisphere_z_up(cosTheta);
 }
 
 __kernel void lambertian_stage(

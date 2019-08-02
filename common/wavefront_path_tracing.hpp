@@ -362,9 +362,8 @@ namespace rt {
 			_kernel_evaluate_envmap_6axis_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_6axis_pdf_stage", program_envmap_sampling.program()));
 
 			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
-			_kernel_sample_lambertian_stage = unique(new OpenCLKernel("sample_lambertian_stage", program_lambertian.program()));
-			_kernel_evaluate_lambertian_pdf_stage = unique(new OpenCLKernel("evaluate_lambertian_pdf_stage", program_lambertian.program()));
 			_kernel_lambertian_stage = unique(new OpenCLKernel("lambertian_stage", program_lambertian.program()));
+			_kernel_sample_or_eval_lambertian_stage = unique(new OpenCLKernel("sample_or_eval_lambertian_stage", program_lambertian.program()));
 
 			OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id);
 			_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
@@ -609,44 +608,14 @@ namespace rt {
 			}
 
 			// Sampling and Eval Pdf Lambertian
-			{
-				// clear queue
-				_queue_sample_bxdf->clear(_step_queue->queue());
-				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
-
-				// sample or eval
-				_kernel_bxdf_sample_or_eval->setArguments(
-					_queue_lambertian->item(),
-					_queue_lambertian->count(),
-
-					_queue_sample_bxdf->item(),
-					_queue_sample_bxdf->count(),
-					_queue_eval_bxdf_pdf->item(),
-					_queue_eval_bxdf_pdf->count(),
-
-					_mem_incident_samples->memory()
-				);
-				_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// sample
-				_kernel_sample_lambertian_stage->setArguments(
-					_mem_extension_results->memory(),
-					_mem_random_state->memory(),
-					_queue_sample_bxdf->item(),
-					_queue_sample_bxdf->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_sample_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// eval pdf
-				_kernel_evaluate_lambertian_pdf_stage->setArguments(
-					_mem_extension_results->memory(),
-					_queue_eval_bxdf_pdf->item(),
-					_queue_eval_bxdf_pdf->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_evaluate_lambertian_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-			}
+			_kernel_sample_or_eval_lambertian_stage->setArguments(
+				_mem_extension_results->memory(),
+				_mem_random_state->memory(),
+				_queue_lambertian->item(),
+				_queue_lambertian->count(),
+				_mem_incident_samples->memory()
+			);
+			_kernel_sample_or_eval_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// Sampling and Eval Pdf Ward
 			{
@@ -1071,9 +1040,8 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_sample_envmap_6axis_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_evaluate_envmap_6axis_pdf_stage;
 
-		std::unique_ptr<OpenCLKernel> _kernel_sample_lambertian_stage;
-		std::unique_ptr<OpenCLKernel> _kernel_evaluate_lambertian_pdf_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_lambertian_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_or_eval_lambertian_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_delta_materials;
 

@@ -273,8 +273,8 @@ namespace rt {
 		WriteOnly,
 	};
 	enum class OpenCLPinnedBufferMode {
-		ReadOnly,
-		WriteOnly,
+		ReadToHost,
+		WriteToDevice,
 	};
 
 	template <class T>
@@ -288,10 +288,10 @@ namespace rt {
 
 			cl_map_flags map_flags;
 			switch (mode) {
-			case OpenCLPinnedBufferMode::ReadOnly:
+			case OpenCLPinnedBufferMode::ReadToHost:
 				map_flags = CL_MAP_READ;
 				break;
-			case OpenCLPinnedBufferMode::WriteOnly:
+			case OpenCLPinnedBufferMode::WriteToDevice:
 				map_flags = CL_MAP_WRITE_INVALIDATE_REGION;
 				break;
 			default:

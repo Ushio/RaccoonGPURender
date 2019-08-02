@@ -195,7 +195,7 @@ namespace rt {
 	public:
 		ReadableBuffer(cl_context context, cl_command_queue queue, int size) {
 			_buffer = unique(new OpenCLBuffer<T>(context, size, OpenCLKernelBufferMode::ReadWrite));
-			_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::ReadOnly));
+			_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::ReadToHost));
 		}
 		std::shared_ptr<OpenCLEvent> enqueue_read(cl_command_queue queue_data_transfer, OpenCLEventList wait_events = OpenCLEventList()) {
 			return _buffer->copy_to_host(_buffer_pinned.get(), queue_data_transfer, wait_events);
@@ -222,7 +222,7 @@ namespace rt {
 	public:
 		WritableBuffer(cl_context context, cl_command_queue queue, int size) {
 			_buffer = unique(new OpenCLBuffer<T>(context, size, OpenCLKernelBufferMode::ReadWrite));
-			_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::WriteOnly));
+			_buffer_pinned = unique(new OpenCLPinnedBuffer<T>(context, queue, size, OpenCLPinnedBufferMode::WriteToDevice));
 		}
 		std::shared_ptr<OpenCLEvent> enqueue_write(cl_command_queue queue_data_transfer, OpenCLEventList wait_events = OpenCLEventList()) {
 			return _buffer->copy_to_device(_buffer_pinned.get(), queue_data_transfer, wait_events);
@@ -378,9 +378,8 @@ namespace rt {
 			OpenCLProgram program_homogeneous_volume("homogeneous_volume.cl", lane.context, lane.device_id);
 			_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
 
-			_kernel_sample_homogeneous_volume_inside_stage   = unique(new OpenCLKernel("sample_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
-			_kernel_evaluate_homogeneous_volume_inside_stage = unique(new OpenCLKernel("evaluate_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
-			_kernel_homogeneous_volume_inside_stage          = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			_kernel_sample_or_eval_homogeneous_volume_inside_stage = unique(new OpenCLKernel("sample_or_eval_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			_kernel_homogeneous_volume_inside_stage                = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
 
 			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
 			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
@@ -417,9 +416,6 @@ namespace rt {
 			_queue_eval_env_6axis_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_sample_env = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_eval_env_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
-
-			_queue_sample_bxdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
-			_queue_eval_bxdf_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
 			_sceneBuffer = sceneManager.createBuffer(lane.context);
 			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
@@ -493,12 +489,8 @@ namespace rt {
 			_kernel_initialize_all_as_new_path->launch(sq, 0, _wavefrontPathCount);
 
 			// initialize queue state
-			_queue_lambertian->clear(sq);
-			_queue_specular->clear(sq);
-			_queue_dierectric->clear(sq);
-			_queue_ward->clear(sq);
-			_queue_homogeneousMediumInside->clear(sq);
-			_queue_homogeneousMediumSurface->clear(sq);
+			clearMaterialQueue();
+			clearStrategyQueue();
 
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), sq);
@@ -511,7 +503,26 @@ namespace rt {
 
 			_avg_sample = 0;
 		}
+	private:
+		void clearMaterialQueue() {
+			auto sq = _step_queue->queue();
 
+			_queue_lambertian->clear(sq);
+			_queue_specular->clear(sq);
+			_queue_dierectric->clear(sq);
+			_queue_ward->clear(sq);
+			_queue_homogeneousMediumInside->clear(sq);
+			_queue_homogeneousMediumSurface->clear(sq);
+		}
+		void clearStrategyQueue() {
+			auto sq = _step_queue->queue();
+
+			_queue_sample_env_6axis->clear(sq);
+			_queue_eval_env_6axis_pdf->clear(sq);
+			_queue_sample_env->clear(sq);
+			_queue_eval_env_pdf->clear(sq);
+		}
+	public:
 		void step() {
 			{
 				std::lock_guard <std::mutex> lock(_restart_mutex);
@@ -549,11 +560,6 @@ namespace rt {
 			}
 
 			// Mixture Strategy
-			_queue_sample_env_6axis->clear(_step_queue->queue());
-			_queue_eval_env_6axis_pdf->clear(_step_queue->queue());
-			_queue_sample_env->clear(_step_queue->queue());
-			_queue_eval_env_pdf->clear(_step_queue->queue());
-
 			_kernel_strategy_selection->setArguments(
 				_mem_random_state->memory(),
 				_mem_extension_results->memory(),
@@ -617,100 +623,26 @@ namespace rt {
 			_kernel_sample_or_eval_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// Sampling and Eval Pdf Ward
-			{
-				_kernel_sample_or_eval_ward_stage->setArguments(
-					_mem_path->memory(),
-					_mem_extension_results->memory(),
-					_materialBuffer->materials->memory(),
-					_materialBuffer->wards->memory(),
-					_mem_random_state->memory(),
-					_queue_ward->item(),
-					_queue_ward->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_sample_or_eval_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				//// clear queue
-				//_queue_sample_bxdf->clear(_step_queue->queue());
-				//_queue_eval_bxdf_pdf->clear(_step_queue->queue());
-
-				//// sample or eval
-				//_kernel_bxdf_sample_or_eval->setArguments(
-				//	_queue_ward->item(),
-				//	_queue_ward->count(),
-
-				//	_queue_sample_bxdf->item(),
-				//	_queue_sample_bxdf->count(),
-				//	_queue_eval_bxdf_pdf->item(),
-				//	_queue_eval_bxdf_pdf->count(),
-
-				//	_mem_incident_samples->memory()
-				//);
-				//_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				//// sampling bxdf
-				//_kernel_sample_ward_stage->setArguments(
-				//	_mem_path->memory(),
-				//	_mem_extension_results->memory(),
-				//	_materialBuffer->materials->memory(),
-				//	_materialBuffer->wards->memory(),
-				//	_mem_random_state->memory(),
-				//	_queue_sample_bxdf->item(),
-				//	_queue_sample_bxdf->count(),
-				//	_mem_incident_samples->memory()
-				//);
-				//_kernel_sample_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				//// eval pdf
-				//_kernel_evaluate_ward_pdf_stage->setArguments(
-				//	_mem_path->memory(),
-				//	_mem_extension_results->memory(),
-				//	_materialBuffer->materials->memory(),
-				//	_materialBuffer->wards->memory(),
-				//	_queue_eval_bxdf_pdf->item(),
-				//	_queue_eval_bxdf_pdf->count(),
-				//	_mem_incident_samples->memory()
-				//);
-				//_kernel_evaluate_ward_pdf_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-			}
+			_kernel_sample_or_eval_ward_stage->setArguments(
+				_mem_path->memory(),
+				_mem_extension_results->memory(),
+				_materialBuffer->materials->memory(),
+				_materialBuffer->wards->memory(),
+				_mem_random_state->memory(),
+				_queue_ward->item(),
+				_queue_ward->count(),
+				_mem_incident_samples->memory()
+			);
+			_kernel_sample_or_eval_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// Sampling and Eval Pdf Homogeneous Volume
-			{
-				// clear queue
-				_queue_sample_bxdf->clear(_step_queue->queue());
-				_queue_eval_bxdf_pdf->clear(_step_queue->queue());
-
-				// sample or eval
-				_kernel_bxdf_sample_or_eval->setArguments(
-					_queue_homogeneousMediumInside->item(),
-					_queue_homogeneousMediumInside->count(),
-
-					_queue_sample_bxdf->item(),
-					_queue_sample_bxdf->count(),
-					_queue_eval_bxdf_pdf->item(),
-					_queue_eval_bxdf_pdf->count(),
-
-					_mem_incident_samples->memory()
-				);
-				_kernel_bxdf_sample_or_eval->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// sample
-				_kernel_sample_homogeneous_volume_inside_stage->setArguments(
-					_mem_random_state->memory(),
-					_queue_sample_bxdf->item(),
-					_queue_sample_bxdf->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_sample_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				// eval pdf
-				_kernel_evaluate_homogeneous_volume_inside_stage->setArguments(
-					_queue_eval_bxdf_pdf->item(),
-					_queue_eval_bxdf_pdf->count(),
-					_mem_incident_samples->memory()
-				);
-				_kernel_evaluate_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-			}
+			_kernel_sample_or_eval_homogeneous_volume_inside_stage->setArguments(
+				_mem_random_state->memory(),
+				_queue_homogeneousMediumInside->item(),
+				_queue_homogeneousMediumInside->count(),
+				_mem_incident_samples->memory()
+			);
+			_kernel_sample_or_eval_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 
 			// Evaluate Env PDF
 			{
@@ -753,8 +685,6 @@ namespace rt {
 					_mem_incident_samples->memory()
 				);
 				_kernel_lambertian_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				_queue_lambertian->clear(_step_queue->queue());
 			}
 			
 			// Evaluate Materials Ward
@@ -771,8 +701,6 @@ namespace rt {
 					_mem_incident_samples->memory()
 				);
 				_kernel_ward_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				_queue_ward->clear(_step_queue->queue());
 			}
 
 			// Volume
@@ -787,7 +715,6 @@ namespace rt {
 					_materialBuffer->homogeneousVolume->memory()
 				);
 				_kernel_homogeneous_volume_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-				_queue_homogeneousMediumSurface->clear(_step_queue->queue());
 			}
 			{
 				_kernel_homogeneous_volume_inside_stage->setArguments(
@@ -802,7 +729,6 @@ namespace rt {
 					_mem_incident_samples->memory()
 				);
 				_kernel_homogeneous_volume_inside_stage->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-				_queue_homogeneousMediumInside->clear(_step_queue->queue());
 			}
 
 			// Specular & Delta
@@ -822,9 +748,6 @@ namespace rt {
 				);
 
 				_kernel_delta_materials->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-
-				_queue_specular->clear(_step_queue->queue());
-				_queue_dierectric->clear(_step_queue->queue());
 			}
 
 			{
@@ -849,6 +772,9 @@ namespace rt {
 				);
 				_kernel_homogeneous_volume_through->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
+
+			clearStrategyQueue();
+			clearMaterialQueue();
 
 			{
 				_kernel_logic->setArguments(
@@ -1062,8 +988,7 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_through;
 
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_stage;
-		std::unique_ptr<OpenCLKernel> _kernel_sample_homogeneous_volume_inside_stage;
-		std::unique_ptr<OpenCLKernel> _kernel_evaluate_homogeneous_volume_inside_stage;
+		std::unique_ptr<OpenCLKernel> _kernel_sample_or_eval_homogeneous_volume_inside_stage;
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_inside_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;
@@ -1107,9 +1032,6 @@ namespace rt {
 		std::unique_ptr<StageQueue> _queue_eval_env_6axis_pdf;
 		std::unique_ptr<StageQueue> _queue_sample_env;
 		std::unique_ptr<StageQueue> _queue_eval_env_pdf;
-
-		std::unique_ptr<StageQueue> _queue_sample_bxdf;
-		std::unique_ptr<StageQueue> _queue_eval_bxdf_pdf;
 
 		// Accumlation Buffer
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;

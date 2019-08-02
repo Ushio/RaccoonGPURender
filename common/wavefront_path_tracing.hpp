@@ -383,7 +383,6 @@ namespace rt {
 
 			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
 			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
-			_kernel_bxdf_sample_or_eval = unique(new OpenCLKernel("bxdf_sample_or_eval", program_mixture_density.program()));
 
 			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
@@ -992,7 +991,6 @@ namespace rt {
 		std::unique_ptr<OpenCLKernel> _kernel_homogeneous_volume_inside_stage;
 
 		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;
-		std::unique_ptr<OpenCLKernel> _kernel_bxdf_sample_or_eval;
 
 		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
 		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;

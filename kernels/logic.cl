@@ -51,11 +51,14 @@ __kernel void logic(
     uint gid = get_global_id(0);
     uint logic_i = wavefrontPath[gid].logic_i++;
     
-    wavefrontPath[gid].L += wavefrontPath[gid].T * shading_results[gid].Le;
-    wavefrontPath[gid].T *= shading_results[gid].T;
-    
-    int hit_primitive_id = extension_results[gid].hit_primitive_id;
+    float3 L = wavefrontPath[gid].L;
+    float3 T = wavefrontPath[gid].T;
 
+    L += T * shading_results[gid].Le;
+    T *= shading_results[gid].T;
+
+    int hit_primitive_id = extension_results[gid].hit_primitive_id;
+    
     bool evalEnv;
     bool newPath;
 
@@ -66,9 +69,8 @@ __kernel void logic(
         evalEnv = false;
         newPath = false;
     }
-    float3 curT = wavefrontPath[gid].T;
-    float luminanceT = 0.2126f * curT.x + 0.7152f * curT.y + 0.0722f * curT.z;
-
+    float luminanceT = 0.2126f * T.x + 0.7152f * T.y + 0.0722f * T.z;
+    
     // Russian Roulette
     float continue_probability = 1.0f;
     if(25 < logic_i) {
@@ -78,7 +80,7 @@ __kernel void logic(
     float u = random_uniform(&state);
     random_states[gid] = state;
     if(u < continue_probability) {
-        wavefrontPath[gid].T /= continue_probability;
+        T /= continue_probability;
     } else {
         newPath = true;
     }
@@ -95,12 +97,12 @@ __kernel void logic(
     if(evalEnv) {
         // contribution env light
         // float3 emission = (float3)(1.0f);
-        // wavefrontPath[gid].L += wavefrontPath[gid].T * emission;
+        // L += T * emission;
         
         // if miss intersect then rd is old dir, otherwise new direction sampled by material stage
         float3 rd = wavefrontPath[gid].rd;
         float3 emission = get_envmap_value(envmap, rd);
-        wavefrontPath[gid].L += wavefrontPath[gid].T * emission;
+        L += T * emission;
     }
 
     // debug normal
@@ -110,7 +112,6 @@ __kernel void logic(
             color = (float3)(0.0f);
         } else {
             color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;
-            // color = extension_results[gid].Ng;
         }
         uint pixel_index = wavefrontPath[gid].pixel_index;
         atomic_add_global(&normal32accum[pixel_index].r, color.x);
@@ -121,7 +122,6 @@ __kernel void logic(
 
     // add contribution
     if(newPath) {
-        float3 L = wavefrontPath[gid].L;
         // float kRadianceClamp = 1000.0f;
         float kRadianceClamp = FLT_MAX;
         if(all(isfinite(L)) && all(L < (float3)(kRadianceClamp))) {
@@ -134,6 +134,9 @@ __kernel void logic(
             // TODO
         }
     }
+
+    wavefrontPath[gid].L = L;
+    wavefrontPath[gid].T = T;
 
 #define NUMBER_OF_QUEUE 7
 

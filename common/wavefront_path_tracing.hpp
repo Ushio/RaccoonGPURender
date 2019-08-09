@@ -24,8 +24,15 @@ namespace rt {
 		OpenCLFloat3 rd;
 		uint32_t logic_i;
 		uint32_t pixel_index;
-		int32_t volume_material;
 	};
+	struct InVolumeList {
+		InVolumeList() {
+			count = 0;
+		}
+		int32_t volumes[7];
+		int32_t count;
+	};
+
 	struct StandardCamera {
 		OpenCLFloat3 eye;
 		OpenCLFloat3 forward;
@@ -399,6 +406,7 @@ namespace rt {
 			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
 			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
+			_mem_inVolumeLists = unique(new OpenCLBuffer<InVolumeList>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
 			_mem_incident_samples = unique(new OpenCLBuffer<IncidentSample>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
@@ -543,6 +551,7 @@ namespace rt {
 					_queue_new_path->item(),
 					_queue_new_path->count(),
 					_mem_path->memory(),
+					_mem_inVolumeLists->memory(),
 					_mem_shading_results->memory(),
 					_mem_extension_results->memory(),
 					_mem_random_state->memory(),
@@ -706,6 +715,7 @@ namespace rt {
 			{
 				_kernel_homogeneous_volume_stage->setArguments(
 					_mem_path->memory(),
+					_mem_inVolumeLists->memory(),
 					_mem_extension_results->memory(),
 					_mem_shading_results->memory(),
 					_queue_homogeneousMediumSurface->item(),
@@ -752,6 +762,7 @@ namespace rt {
 			{
 				_kernel_homogeneous_volume_through->setArguments(
 					_mem_path->memory(),
+					_mem_inVolumeLists->memory(),
 					_mem_extension_results->memory(),
 					_mem_random_state->memory(),
 					_materialBuffer->materials->memory(),
@@ -804,6 +815,7 @@ namespace rt {
 			}
 
 			// to intermediate if it is possible.
+			_step_queue->flush();
 			{
 				_kernel_acquire_mutex_in_step->setArguments(
 					_intermediate_mutex->memory(),
@@ -824,6 +836,7 @@ namespace rt {
 				);
 				_kernel_free_mutex_in_step->launch(_step_queue->queue(), 0, 1);
 			}
+			_step_queue->flush();
 
 			// for previews
 			if (onNormalRecieved) {
@@ -861,6 +874,8 @@ namespace rt {
 			});
 
 			_eventQueue += enqueue_marker(_step_queue->queue());
+
+			_step_queue->flush();
 		}
 
 		// Finalize Process, copy _accum_color_intermediate_shared to _accum_color_intermediate
@@ -1013,6 +1028,7 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<uint64_t>>      _mem_next_pixel_index;
 		std::unique_ptr<OpenCLBuffer<ExtensionResult>> _mem_extension_results;
 		std::unique_ptr<OpenCLBuffer<ShadingResult>> _mem_shading_results;
+		std::unique_ptr<OpenCLBuffer<InVolumeList>> _mem_inVolumeLists;
 
 		std::unique_ptr<OpenCLBuffer<IncidentSample>> _mem_incident_samples;
 

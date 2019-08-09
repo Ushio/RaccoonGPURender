@@ -20,6 +20,7 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
+			
 
 			static int i = 0;
 			if (i++ % 50 == 0) {
@@ -35,7 +36,8 @@ public:
 		_dirty = true;
 	}
 	ofImage &getImageOnMainThread() {
-		if (_dirty) {
+		bool isDirty = _dirty.exchange(false);
+		if (isDirty) {
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_image.setFromPixels(_imagedata);
 		}

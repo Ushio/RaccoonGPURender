@@ -18,6 +18,7 @@ __kernel void new_path(
     __global const uint *queue_item, 
     __global const uint *queue_count, 
     __global WavefrontPath *wavefrontPath, 
+    __global InVolumeList *inVolumeLists,
     __global ShadingResult *shading_results, 
     __global ExtensionResult *extension_results, 
     __global uint4 *random_states,
@@ -57,7 +58,7 @@ __kernel void new_path(
     wavefrontPath[path_index].ro = camera.eye;
     wavefrontPath[path_index].rd = normalize(sample_on_objectplane - camera.eye);
 
-    wavefrontPath[path_index].volume_material = -1;
+    inVolumeLists[path_index].count = 0;
 
     random_states[path_index] = random_state;
 

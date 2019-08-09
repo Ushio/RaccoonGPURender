@@ -18,6 +18,7 @@ float pdf_uniform_on_unit_sphere() {
 
 __kernel void homogeneous_volume_stage(
     __global WavefrontPath *wavefrontPath, 
+    __global InVolumeList *inVolumeLists,
     __global const ExtensionResult *extension_results,
     __global ShadingResult *shading_results, 
     __global uint *homogeneousVolumeSurface_queue_item, 
@@ -33,6 +34,7 @@ __kernel void homogeneous_volume_stage(
     uint item = homogeneousVolumeSurface_queue_item[gid];
 
     int hit_primitive_id = extension_results[item].hit_primitive_id;
+    
     // int material_index = materials[hit_primitive_id].material_index;
     // HomogeneousVolume volume = homogeneousVolumes[material_index];
     
@@ -46,13 +48,15 @@ __kernel void homogeneous_volume_stage(
     shading_results[item].Le = (float3)(0.0f);
     shading_results[item].T = (float3)(1.0f);
 
+    InVolumeList inVolumeList = inVolumeLists[item];
     if(backside) {
         // go outside
-        wavefrontPath[item].volume_material = -1;
+        inVolumeList_Remove(&inVolumeList, materials, homogeneousVolumes, hit_primitive_id /* is material id */);
     } else {
         // go inside
-        wavefrontPath[item].volume_material = hit_primitive_id;
+        inVolumeList_Add(&inVolumeList, hit_primitive_id /* is material id */);
     }
+    inVolumeLists[item] = inVolumeList;
 
     ro = ro + rd * (tmin + 1.0e-5f);
     

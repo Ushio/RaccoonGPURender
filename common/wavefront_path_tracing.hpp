@@ -750,6 +750,17 @@ namespace rt {
 			}
 
 			{
+				_kernel_homogeneous_volume_through->setArguments(
+					_mem_path->memory(),
+					_mem_extension_results->memory(),
+					_mem_random_state->memory(),
+					_materialBuffer->materials->memory(),
+					_materialBuffer->homogeneousVolume->memory()
+				);
+				_kernel_homogeneous_volume_through->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			}
+
+			{
 				_kernel_extension_ray_cast->setArguments(
 					_mem_path->memory(),
 					_mem_extension_results->memory(),
@@ -759,17 +770,6 @@ namespace rt {
 					_sceneBuffer->pointsCL->memory()
 				);
 				_kernel_extension_ray_cast->launch(_step_queue->queue(), 0, _wavefrontPathCount);
-			}
-
-			{
-				_kernel_homogeneous_volume_through->setArguments(
-					_mem_path->memory(),
-					_mem_extension_results->memory(),
-					_mem_random_state->memory(),
-					_materialBuffer->materials->memory(),
-					_materialBuffer->homogeneousVolume->memory()
-				);
-				_kernel_homogeneous_volume_through->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			clearStrategyQueue();
@@ -800,7 +800,7 @@ namespace rt {
 					_queue_homogeneousMediumInside->item(),
 					_queue_homogeneousMediumInside->count()
 				);
-				_kernel_logic->launch(_step_queue->queue(), 0, _wavefrontPathCount);
+			    _kernel_logic->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}
 
 			// to intermediate if it is possible.

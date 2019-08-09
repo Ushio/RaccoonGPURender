@@ -23,36 +23,36 @@ __kernel void strategy_selection(
     ) {
     
     uint item = get_global_id(0);
-    int hit_primitive_id    = extension_results[item].hit_primitive_id;
+    int hit_primitive_id    = extension_results[item].hit_primitive_id;   
+    int hit_volume_material = extension_results[item].hit_volume_material;
+    bool surface_hit = 0 <= hit_primitive_id;
+    bool volume_hit  = 0 <= hit_volume_material;
+    bool any_hit = surface_hit || volume_hit;
     IncidentSample sample = {};
     
-    bool isVolume = false;
-
-    if(0 <= hit_primitive_id) {
-        uint material_type = materials[hit_primitive_id].material_type;
-
-        uint4 state = random_states[item];
-        float u = random_uniform(&state);
-        random_states[item] = state;
-        
-        // Check hit is volume
-        int hit_volume_material = extension_results[item].hit_volume_material;
-        if(0 <= hit_volume_material) {
-            isVolume = materials[hit_volume_material].material_type == kMaterialType_HomogeneousVolume;
-        }
-
+    if(any_hit) {
         // decide sampling probability
-        if( material_type == kMaterialType_Lambertian ||
-            material_type == kMaterialType_Ward ||
-            isVolume
-            ) {
+        if(surface_hit) {
+            uint material_type = materials[hit_primitive_id].material_type;
+            
+            if( material_type == kMaterialType_Lambertian ||
+                material_type == kMaterialType_Ward) {
+                const float bxdf_p = 0.5f;
+                sample.selection_probs[kStrategy_Bxdf] = bxdf_p;
+                sample.selection_probs[kStrategy_Env]  = 1.0f - bxdf_p;
+            } else {
+                sample.selection_probs[kStrategy_Bxdf] = 1.0f;
+                sample.selection_probs[kStrategy_Env]  = 0.0f;
+            }
+        } else if(volume_hit) {
             const float bxdf_p = 0.5f;
             sample.selection_probs[kStrategy_Bxdf] = bxdf_p;
             sample.selection_probs[kStrategy_Env]  = 1.0f - bxdf_p;
-        } else {
-            sample.selection_probs[kStrategy_Bxdf] = 1.0f;
-            sample.selection_probs[kStrategy_Env]  = 0.0f;
         }
+        
+        uint4 state = random_states[item];
+        float u = random_uniform(&state);
+        random_states[item] = state;
 
         // selection
         if(u <= sample.selection_probs[kStrategy_Bxdf]) {
@@ -60,11 +60,12 @@ __kernel void strategy_selection(
         } else {
             sample.strategy = kStrategy_Env;
         }
-
-        incident_samples[item] = sample;
     } else {
-        incident_samples[item].strategy = kStrategy_None;
+        sample.selection_probs[kStrategy_Bxdf] = 0.0f;
+        sample.selection_probs[kStrategy_Env]  = 0.0f;
+        sample.strategy = kStrategy_None;
     }
+    incident_samples[item] = sample;
 
     // Enqueue
 #define NUMBER_OF_QUEUE 4
@@ -72,8 +73,8 @@ __kernel void strategy_selection(
     __global uint *global_queue_counts [NUMBER_OF_QUEUE] = { sample_env_queue_count, eval_env_pdf_queue_count, sample_env_6axis_queue_count, eval_env_6axis_pdf_queue_count };
 
     // if it is volume, we must use basic envmap sampling. 
-    const uint Index_SampleEnvmap   = isVolume ? 0 : 2;
-    const uint Index_EvaluateEnvmap = isVolume ? 1 : 3;
+    const uint Index_SampleEnvmap   = volume_hit ? 0 : 2;
+    const uint Index_EvaluateEnvmap = volume_hit ? 1 : 3;
     
     int number_of_enqueue = 0;
     int enqueues[kStrategy_Count - 1 /* no bxdf */];
@@ -82,7 +83,7 @@ __kernel void strategy_selection(
     env   => this is env sample ? sample_queue_of[s] : eval_pdf_queue_of[s];
     light => this is env sample ? sample_queue_of[s] : eval_pdf_queue_of[s];
      */
-    if(0 <= hit_primitive_id) {
+    if(any_hit) {
         if(sample.selection_probs[kStrategy_Env] != 0.0f) {
             enqueues[number_of_enqueue] = sample.strategy == kStrategy_Env ? Index_SampleEnvmap : Index_EvaluateEnvmap;
             number_of_enqueue++;

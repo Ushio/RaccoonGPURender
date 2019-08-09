@@ -57,11 +57,10 @@ bool intersect_bvh(
 	__global uint *primitive_ids, 
 	__global uint *indices,
 	__global float4 *points,
-	 float3 ro, float3 rd, RayHit *hit) {
+	 float3 ro, float3 rd, float tmin, RayHit *hit) {
 
 	bool intersected = false;
 	float3 one_over_rd = (float3)(1.0f) / rd;
-	float tmin = FLT_MAX;
 	float2 uv;
 	int primitive_index = -1;
 
@@ -176,9 +175,10 @@ __kernel void extension_ray_cast(
 	float3 ro = wavefrontPath[gid].ro;
 	float3 rd = wavefrontPath[gid].rd;
 
+	float tmin = results[gid].tmin;
+
 	RayHit hit;
-	if(intersect_bvh(nodes, primitive_ids, indices, points, ro, rd, &hit) == false) {
-		results[gid].hit_primitive_id = -1;
+	if(intersect_bvh(nodes, primitive_ids, indices, points, ro, rd, tmin, &hit) == false) {
 		return;
 	}
 	
@@ -186,13 +186,14 @@ __kernel void extension_ray_cast(
 	float3 v0 = points[indices[index + 0]].xyz;
 	float3 v1 = points[indices[index + 1]].xyz;
 	float3 v2 = points[indices[index + 2]].xyz;
-
+	
 	// Counter-ClockWise (CCW)
 	// float3 Ng = normalize(cross(v1 - v0, v2 - v1));
 
 	// ClockWise (CW)
 	float3 Ng = normalize(cross(v2 - v1, v1 - v0));
 
+	// Primitive Hit
 	results[gid].hit_primitive_id = hit.primitive_index;
 	results[gid].tmin = hit.tmin;
 	results[gid].Ng = Ng;

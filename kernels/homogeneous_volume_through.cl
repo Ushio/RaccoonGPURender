@@ -12,28 +12,27 @@ __kernel void homogeneous_volume_through(
     __global const HomogeneousVolume *homogeneousVolumes
 ) {
 	uint item = get_global_id(0);
-    int volume_material = wavefrontPath[item].volume_material;
 
-    if(volume_material < 0) {
-        // No volumes
-        return;
-    }
-
-	float tmin = results[item].tmin;
-
-    int material_index = materials[volume_material].material_index;
-    HomogeneousVolume volume = homogeneousVolumes[material_index];
-
-    uint4 random_state = random_states[item];
-    float u = random_uniform(&random_state);
-    random_states[item] = random_state;
+    results[item].hit_primitive_id    = -1;
+    int hit_volume_material = wavefrontPath[item].volume_material;
+    results[item].hit_volume_material = hit_volume_material;
     
-    float d = - 1.0f / volume.C * log(u);
-    if(d < tmin) {
+    float tmin = FLT_MAX;
+
+    // Hit Test in Volume
+    if(0 <= hit_volume_material) {
+        int material_index = materials[hit_volume_material].material_index;
+        HomogeneousVolume volume = homogeneousVolumes[material_index];
+
+        uint4 random_state = random_states[item];
+        float u = random_uniform(&random_state);
+        random_states[item] = random_state;
+        
         // hit in the volume
-        results[item].hit_volume_material = volume_material;
-        results[item].tmin = d;
+        tmin = - 1.0f / volume.C * log(u);
     }
+
+    results[item].tmin = tmin;
 }
 
 #endif

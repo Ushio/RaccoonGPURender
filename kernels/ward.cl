@@ -89,8 +89,8 @@ __kernel void sample_or_eval_ward_stage(
         return;
     }
     uint item = src_queue_item[gid];
-    int hit_primitive_id = extension_results[item].hit_primitive_id;
-    Ward ward = wards[materials[hit_primitive_id].material_index];
+    int hit_surface_material = extension_results[item].hit_surface_material;
+    Ward ward = wards[materials[hit_surface_material].material_index];
     
     float3 wo = -wavefrontPath[item].rd;
 
@@ -134,8 +134,8 @@ __kernel void ward_stage(
     }
     uint item = ward_queue_item[gid];
 
-    int hit_primitive_id = extension_results[item].hit_primitive_id;
-    Ward ward = wards[materials[hit_primitive_id].material_index];
+    int hit_surface_material = extension_results[item].hit_surface_material;
+    Ward ward = wards[materials[hit_surface_material].material_index];
 
     float tmin = extension_results[item].tmin;
     float3 Ng = extension_results[item].Ng;

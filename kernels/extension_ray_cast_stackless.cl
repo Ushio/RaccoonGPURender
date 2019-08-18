@@ -49,6 +49,32 @@ bool slabs_with_hit(float3 p0, float3 p1, float3 ro, float3 one_over_rd, float f
 	return region_min <= region_max && 0.0f <= region_max && region_min <= farclip_t;
 }
 
+bool intersect_sphere(float3 ro, float3 rd, float3 o, float r, float *t_min) {
+	float r_sq = r * r;
+	float3 S = ro - o;
+	float3 crs = cross(S, rd);
+	float d_sq = dot(crs, crs);
+	
+	float B = dot(S, rd);
+	float D = r_sq - d_sq;
+	if(D < 0.0f) {
+		return false;
+	}
+	float D_sqrt = sqrt(D);
+	float t0 = -B - D_sqrt;
+	float t1 = -B + D_sqrt;
+
+	if(0.0f < t0 && t0 < *t_min) {
+		*t_min  = t0;
+		return true;
+	}
+	if(0.0f < t1 && t1 < *t_min) {
+		*t_min  = t1;
+		return true;
+	}
+	return false;
+}
+
 /* 
  hit is expected uninitialize.
 */
@@ -57,6 +83,8 @@ bool intersect_bvh(
 	__global uint *primitive_ids, 
 	__global uint *indices,
 	__global float4 *points,
+	int sphereBegin,
+	__global float4 *spheres,
 	 float3 ro, float3 rd, float tmin, RayHit *hit) {
 
 	bool intersected = false;
@@ -130,13 +158,22 @@ bool intersect_bvh(
 	  		int end = nodes[node].primitive_indices_end;
 			for (int i = beg; i < end; ++i) {
 				uint this_primitive_index = primitive_ids[i];
-				int index = this_primitive_index * 3;
-				float3 v0 = points[indices[index + 0]].xyz;
-				float3 v1 = points[indices[index + 1]].xyz;
-				float3 v2 = points[indices[index + 2]].xyz;
-				if (intersect_ray_triangle(ro, rd, v0, v1, v2, &tmin, &uv)) {
-					primitive_index = this_primitive_index;
-					intersected = true;
+				if(this_primitive_index < sphereBegin) {
+					int index = this_primitive_index * 3;
+					float3 v0 = points[indices[index + 0]].xyz;
+					float3 v1 = points[indices[index + 1]].xyz;
+					float3 v2 = points[indices[index + 2]].xyz;
+					if (intersect_ray_triangle(ro, rd, v0, v1, v2, &tmin, &uv)) {
+						primitive_index = this_primitive_index;
+						intersected = true;
+					}
+				} else {
+					int sphere_index = this_primitive_index - sphereBegin;
+					float4 sphere = spheres[sphere_index];
+					if(intersect_sphere(ro, rd, sphere.xyz, sphere.w, &tmin)) {
+						primitive_index = this_primitive_index;
+						intersected = true;
+					}
 				}
 			}
 		}
@@ -168,7 +205,9 @@ __kernel void extension_ray_cast(
 	__global StacklessBVHNode *nodes,
 	__global uint *primitive_ids, 
 	__global uint *indices,
-	__global float4 *points
+	__global float4 *points,
+	int sphereBegin,
+	__global float4 *spheres
 ) {
 	uint gid = get_global_id(0);
 
@@ -178,23 +217,29 @@ __kernel void extension_ray_cast(
 	float tmin = results[gid].tmin;
 
 	RayHit hit;
-	if(intersect_bvh(nodes, primitive_ids, indices, points, ro, rd, tmin, &hit) == false) {
+	if(intersect_bvh(nodes, primitive_ids, indices, points, sphereBegin, spheres, ro, rd, tmin, &hit) == false) {
 		return;
 	}
 	
-	int index = hit.primitive_index * 3;
-	float3 v0 = points[indices[index + 0]].xyz;
-	float3 v1 = points[indices[index + 1]].xyz;
-	float3 v2 = points[indices[index + 2]].xyz;
-	
-	// Counter-ClockWise (CCW)
-	// float3 Ng = normalize(cross(v1 - v0, v2 - v1));
+	float3 Ng;
+	if(hit.primitive_index < sphereBegin) {
+		int index = hit.primitive_index * 3;
+		float3 v0 = points[indices[index + 0]].xyz;
+		float3 v1 = points[indices[index + 1]].xyz;
+		float3 v2 = points[indices[index + 2]].xyz;
+		
+		// Counter-ClockWise (CCW)
+		// float3 Ng = normalize(cross(v1 - v0, v2 - v1));
 
-	// ClockWise (CW)
-	float3 Ng = normalize(cross(v2 - v1, v1 - v0));
+		// ClockWise (CW)
+		Ng = normalize(cross(v2 - v1, v1 - v0));
+	} else {
+		int sphere_index = hit.primitive_index - sphereBegin;
+		Ng = normalize((ro + rd * hit.tmin) - spheres[sphere_index].xyz);
+	}
 
 	// Primitive Hit
-	results[gid].hit_primitive_id = hit.primitive_index;
+	results[gid].hit_surface_material = hit.primitive_index;
 	results[gid].tmin = hit.tmin;
 	results[gid].Ng = Ng;
 	results[gid].hit_volume_material = -1;

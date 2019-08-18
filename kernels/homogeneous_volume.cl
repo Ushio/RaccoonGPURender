@@ -33,9 +33,9 @@ __kernel void homogeneous_volume_stage(
 
     uint item = homogeneousVolumeSurface_queue_item[gid];
 
-    int hit_primitive_id = extension_results[item].hit_primitive_id;
+    int hit_surface_material = extension_results[item].hit_surface_material;
     
-    // int material_index = materials[hit_primitive_id].material_index;
+    // int material_index = materials[hit_surface_material].material_index;
     // HomogeneousVolume volume = homogeneousVolumes[material_index];
     
     float tmin = extension_results[item].tmin;
@@ -51,10 +51,10 @@ __kernel void homogeneous_volume_stage(
     InVolumeList inVolumeList = inVolumeLists[item];
     if(backside) {
         // go outside
-        inVolumeList_Remove(&inVolumeList, materials, homogeneousVolumes, hit_primitive_id /* is material id */);
+        inVolumeList_Remove(&inVolumeList, materials, homogeneousVolumes, hit_surface_material /* is material id */);
     } else {
         // go inside
-        inVolumeList_Add(&inVolumeList, hit_primitive_id /* is material id */);
+        inVolumeList_Add(&inVolumeList, hit_surface_material /* is material id */);
     }
     inVolumeLists[item] = inVolumeList;
 

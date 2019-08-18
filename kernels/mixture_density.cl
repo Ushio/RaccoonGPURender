@@ -23,9 +23,9 @@ __kernel void strategy_selection(
     ) {
     
     uint item = get_global_id(0);
-    int hit_primitive_id    = extension_results[item].hit_primitive_id;   
+    int hit_surface_material    = extension_results[item].hit_surface_material;   
     int hit_volume_material = extension_results[item].hit_volume_material;
-    bool surface_hit = 0 <= hit_primitive_id;
+    bool surface_hit = 0 <= hit_surface_material;
     bool volume_hit  = 0 <= hit_volume_material;
     bool any_hit = surface_hit || volume_hit;
     IncidentSample sample = {};
@@ -33,7 +33,7 @@ __kernel void strategy_selection(
     if(any_hit) {
         // decide sampling probability
         if(surface_hit) {
-            uint material_type = materials[hit_primitive_id].material_type;
+            uint material_type = materials[hit_surface_material].material_type;
             
             if( material_type == kMaterialType_Lambertian ||
                 material_type == kMaterialType_Ward) {

@@ -30,7 +30,7 @@ typedef struct {
 } InVolumeList;
 
 typedef struct {
-    int hit_primitive_id;
+    int hit_surface_material;
     int hit_volume_material;
     float tmin;
     float3 Ng;

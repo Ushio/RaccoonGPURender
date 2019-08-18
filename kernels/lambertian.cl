@@ -87,8 +87,8 @@ __kernel void lambertian_stage(
     }
     uint item = lambertian_queue_item[gid];
 
-    int hit_primitive_id = extension_results[item].hit_primitive_id;
-    Lambertian lambertian = lambertians[materials[hit_primitive_id].material_index];
+    int hit_surface_material = extension_results[item].hit_surface_material;
+    Lambertian lambertian = lambertians[materials[hit_surface_material].material_index];
 
     float3 Ng = extension_results[item].Ng;
     float3 ro = wavefrontPath[item].ro;

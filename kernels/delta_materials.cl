@@ -48,8 +48,8 @@ __kernel void delta_materials(
     if(gid < *specular_queue_count) {
         uint path_index = specular_queue_item[gid];
     
-        int hit_primitive_id = extension_results[path_index].hit_primitive_id;
-        int material_index = materials[hit_primitive_id].material_index;
+        int hit_surface_material = extension_results[path_index].hit_surface_material;
+        int material_index = materials[hit_surface_material].material_index;
     
         Specular specular = speculars[material_index];
         float tmin = extension_results[path_index].tmin;
@@ -79,8 +79,8 @@ __kernel void delta_materials(
     if(gid < *dierectric_queue_count) {
         uint path_index = dierectric_queue_item[gid];
     
-        int hit_primitive_id = extension_results[path_index].hit_primitive_id;
-        int material_index = materials[hit_primitive_id].material_index;
+        int hit_surface_material = extension_results[path_index].hit_surface_material;
+        int material_index = materials[hit_surface_material].material_index;
     
         Dierectric dierectric = dierectrics[material_index];
         float tmin = extension_results[path_index].tmin;

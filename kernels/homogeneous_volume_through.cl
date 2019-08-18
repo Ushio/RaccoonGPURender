@@ -15,7 +15,7 @@ __kernel void homogeneous_volume_through(
 	uint item = get_global_id(0);
     uint4 random_state = random_states[item];
 
-    results[item].hit_primitive_id    = -1;
+    results[item].hit_surface_material    = -1;
 
     int hit_volume_material = -1;
 

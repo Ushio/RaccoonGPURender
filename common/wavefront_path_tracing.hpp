@@ -778,7 +778,9 @@ namespace rt {
 					_sceneBuffer->stacklessBVHNodesCL->memory(),
 					_sceneBuffer->primitive_idsCL->memory(),
 					_sceneBuffer->indicesCL->memory(),
-					_sceneBuffer->pointsCL->memory()
+					_sceneBuffer->pointsCL->memory(),
+					_sceneBuffer->sphereBegin,
+					_sceneBuffer->spheresCL->memory()
 				);
 				_kernel_extension_ray_cast->launch(_step_queue->queue(), 0, _wavefrontPathCount);
 			}

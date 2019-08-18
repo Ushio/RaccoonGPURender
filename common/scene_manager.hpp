@@ -192,6 +192,9 @@ namespace rt {
 		std::unique_ptr<OpenCLBuffer<uint32_t>> primitive_idsCL;
 		std::unique_ptr<OpenCLBuffer<uint32_t>> indicesCL;
 		std::unique_ptr<OpenCLBuffer<OpenCLFloat3>> pointsCL;
+
+		int32_t sphereBegin = 0;
+		std::unique_ptr<OpenCLBuffer<OpenCLFloat4>> spheresCL;
 	};
 
 	class MaterialBuffer {
@@ -269,11 +272,49 @@ namespace rt {
 
 			add_materials(_material_storage.get(), p, xformInverseTransposed);
 		}
+
+		void addPointPrimitive(houdini_alembic::PointObject *p) {
+			SCOPED_PROFILE("addPointPrimitive()");
+			SET_PROFILE_DESC(p->name.c_str());
+
+			glm::dmat4 xform;
+			for (int i = 0; i < 16; ++i) {
+				glm::value_ptr(xform)[i] = p->combinedXforms.value_ptr()[i];
+			}
+			glm::dmat3 xformInverseTransposed = glm::inverseTranspose(xform);
+
+			// add vertex
+			auto pscale = p->points.column_as_float("pscale");
+			if (pscale == nullptr) {
+				return;
+			}
+
+			_spheres.reserve(_spheres.size() + p->P.size());
+			for (int i = 0; i < p->P.size(); ++i) {
+				auto srcP = p->P[i];
+				auto radius = pscale->get(i);
+				glm::vec3 p = xform * glm::dvec4(srcP.x, srcP.y, srcP.z, 1.0f);
+				OpenCLFloat4 sphere;
+				sphere = glm::vec4(p, radius);
+				_spheres.emplace_back(sphere);
+			}
+
+			// fallback
+			auto fallback_material = []() {
+				return Lambertian(glm::vec3(), glm::vec3(0.9f, 0.1f, 0.9f), false);
+			};
+			for (int i = 0; i < p->P.size(); ++i) {
+				_material_storage->add(fallback_material(), kMaterialType_Lambertian);
+			}
+		}
 		void addPoint(houdini_alembic::PointObject *p) {
 			auto point_type = p->points.column_as_string("point_type");
 			if (point_type == nullptr) {
+				addPointPrimitive(p);
 				return;
 			}
+
+			// Process Point Env
 			for (int i = 0; i < point_type->rowCount(); ++i) {
 				if (point_type->get(i) == "ImageEnvmap") {
 					std::string filename;
@@ -362,9 +403,28 @@ namespace rt {
 				prim.upper_x = max_value.x;
 				prim.upper_y = max_value.y;
 				prim.upper_z = max_value.z;
-				prim.primID = i;
+				prim.primID = primitives.size();
 				primitives.emplace_back(prim);
 			}
+
+			_sphereBegin = primitives.size();
+			primitives.reserve(primitives.size() + _spheres.size());
+			for (int i = 0; i < _spheres.size(); ++i) {
+				glm::vec3 min_value = _spheres[i].as_vec3() - glm::vec3(_spheres[i].w);
+				glm::vec3 max_value = _spheres[i].as_vec3() + glm::vec3(_spheres[i].w);
+				
+				RTCBuildPrimitive prim = {};
+				prim.lower_x = min_value.x;
+				prim.lower_y = min_value.y;
+				prim.lower_z = min_value.z;
+				prim.geomID = 0;
+				prim.upper_x = max_value.x;
+				prim.upper_y = max_value.y;
+				prim.upper_z = max_value.z;
+				prim.primID = primitives.size();
+				primitives.emplace_back(prim);
+			}
+
 			_embreeBVH = std::shared_ptr<EmbreeBVH>(create_embreeBVH(primitives));
 			_stacklessBVH = std::shared_ptr<StacklessBVH>(create_stackless_bvh(_embreeBVH.get()));
 		}
@@ -376,6 +436,10 @@ namespace rt {
 			buffer->indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _indices.data(), _indices.size(), OpenCLKernelBufferMode::ReadOnly));
 			buffer->stacklessBVHNodesCL = std::unique_ptr<OpenCLBuffer<StacklessBVHNode>>(new OpenCLBuffer<StacklessBVHNode>(context, _stacklessBVH->nodes.data(), _stacklessBVH->nodes.size(), OpenCLKernelBufferMode::ReadOnly));
 			buffer->primitive_idsCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), OpenCLKernelBufferMode::ReadOnly));
+			
+			buffer->sphereBegin = _sphereBegin;
+			buffer->spheresCL = createBufferSafe(context, _spheres.data(), _spheres.size());
+
 			return buffer;
 		}
 
@@ -386,7 +450,7 @@ namespace rt {
 			buffer->speculars          = _material_storage->createBuffer<Specular>(context);
 			buffer->dierectrics        = _material_storage->createBuffer<Dierectric>(context);
 			buffer->wards              = _material_storage->createBuffer<Ward>(context);
-			buffer->homogeneousVolume = _material_storage->createBuffer<HomogeneousVolume>(context);
+			buffer->homogeneousVolume  = _material_storage->createBuffer<HomogeneousVolume>(context);
 			return buffer;
 		}
 
@@ -442,6 +506,10 @@ namespace rt {
 
 		std::vector<uint32_t> _indices;
 		std::vector<OpenCLFloat3> _points;
+
+		int32_t _sphereBegin = 0;
+		std::vector<OpenCLFloat4> _spheres;
+
 		std::shared_ptr<EmbreeBVH> _embreeBVH;
 		std::shared_ptr<StacklessBVH> _stacklessBVH;
 

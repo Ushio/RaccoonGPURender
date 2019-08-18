@@ -65,7 +65,7 @@ __kernel void new_path(
     shading_results[path_index].Le = (float3)(0.0f);
     shading_results[path_index].T  = (float3)(1.0f);
 
-    extension_results[path_index].hit_primitive_id = -1;
+    extension_results[path_index].hit_surface_material = -1;
     extension_results[path_index].tmin = FLT_MAX;
     extension_results[path_index].Ng = (float3)(0.0f);
 }

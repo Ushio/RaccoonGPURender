@@ -57,13 +57,13 @@ __kernel void logic(
     L += T * shading_results[gid].Le;
     T *= shading_results[gid].T;
 
-    int hit_primitive_id    = extension_results[gid].hit_primitive_id;   
+    int hit_surface_material    = extension_results[gid].hit_surface_material;   
     int hit_volume_material = extension_results[gid].hit_volume_material;
     
     bool evalEnv;
     bool newPath;
 
-    if(hit_primitive_id < 0 && hit_volume_material < 0) {
+    if(hit_surface_material < 0 && hit_volume_material < 0) {
         newPath = true;
         evalEnv = true;
     } else {
@@ -109,7 +109,7 @@ __kernel void logic(
     // debug normal
     if(logic_i == 0) {
         float3 color;
-        if(0 <= hit_primitive_id) {
+        if(0 <= hit_surface_material) {
             color = (float3)(0.0f);
         } else {
             color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;
@@ -145,8 +145,8 @@ __kernel void logic(
     if(newPath) {
         enqueue_index = 0;
     } else {
-        if(0 <= hit_primitive_id) {
-            enqueue_index = materials[hit_primitive_id].material_type;
+        if(0 <= hit_surface_material) {
+            enqueue_index = materials[hit_surface_material].material_type;
         } else if(0 <= hit_volume_material) {
             enqueue_index = kMaterialType_HomogeneousVolumeInside;
         }

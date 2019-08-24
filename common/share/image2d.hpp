@@ -40,6 +40,13 @@ namespace rt {
 				_values[i].z = glm::clamp(_values[i].z, min_value, max_value);
 			}
 		}
+		void scale(float s) {
+			for (int i = 0; i < _values.size(); ++i) {
+				_values[i].x *= s;
+				_values[i].y *= s;
+				_values[i].z *= s;
+			}
+		}
 
 		bool has_area() const {
 			return !_values.empty();

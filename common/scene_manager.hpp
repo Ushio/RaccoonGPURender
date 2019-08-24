@@ -303,9 +303,21 @@ namespace rt {
 			auto fallback_material = []() {
 				return Lambertian(glm::vec3(), glm::vec3(0.9f, 0.1f, 0.9f), false);
 			};
-			for (int i = 0; i < p->P.size(); ++i) {
-				_material_storage->add(fallback_material(), kMaterialType_Lambertian);
+
+			auto colors = p->points.column_as_vector3("Cd");
+			if (colors == nullptr) {
+				for (int i = 0; i < p->P.size(); ++i) {
+					_material_storage->add(fallback_material(), kMaterialType_Lambertian);
+				}
+			} else {
+				for (int i = 0; i < p->P.size(); ++i) {
+					glm::vec3 Cd = glm::vec3(0.0f);
+					colors->get(i, glm::value_ptr(Cd));
+					Lambertian lambert(glm::vec3(), Cd, false);
+					_material_storage->add(lambert, kMaterialType_Lambertian);
+				}
 			}
+
 		}
 		void addPoint(houdini_alembic::PointObject *p) {
 			auto point_type = p->points.column_as_string("point_type");
@@ -319,11 +331,15 @@ namespace rt {
 				if (point_type->get(i) == "ImageEnvmap") {
 					std::string filename;
 					float clamp_max = std::numeric_limits<float>::max();
+					float scale = 1.0f;
 					if (auto r = p->points.column_as_string("file")) {
 						filename = r->get(i);
 					}
 					if (auto r = p->points.column_as_float("clamp")) {
 						clamp_max = r->get(i);
+					}
+					if (auto r = p->points.column_as_float("scale")) {
+						scale = r->get(i);
 					}
 					if (filename.empty() == false) {
 #if USE_WHITE_FURNANCE_ENV
@@ -339,6 +355,10 @@ namespace rt {
 #endif
 						// _envmapImage->clamp_rgb(0.0f, 10000.0f);
 						_envmapImage->clamp_rgb(0.0f, clamp_max);
+
+						if (scale != 1.0f) {
+							_envmapImage->scale(scale);
+						}
 
 						SCOPED_PROFILE("create envmap sampler");
 						SET_PROFILE_DESC(filename.c_str());
@@ -432,10 +452,10 @@ namespace rt {
 		std::unique_ptr<SceneBuffer> createBuffer(cl_context context) const {
 			std::unique_ptr<SceneBuffer> buffer(new SceneBuffer());
 			buffer->top_aabb = _stacklessBVH->top_aabb;
-			buffer->pointsCL = std::unique_ptr<OpenCLBuffer<OpenCLFloat3>>(new OpenCLBuffer<OpenCLFloat3>(context, _points.data(), _points.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->indicesCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _indices.data(), _indices.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->stacklessBVHNodesCL = std::unique_ptr<OpenCLBuffer<StacklessBVHNode>>(new OpenCLBuffer<StacklessBVHNode>(context, _stacklessBVH->nodes.data(), _stacklessBVH->nodes.size(), OpenCLKernelBufferMode::ReadOnly));
-			buffer->primitive_idsCL = std::unique_ptr<OpenCLBuffer<uint32_t>>(new OpenCLBuffer<uint32_t>(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), OpenCLKernelBufferMode::ReadOnly));
+			buffer->pointsCL = createBufferSafe(context, _points.data(), _points.size());
+			buffer->indicesCL = createBufferSafe(context, _indices.data(), _indices.size());
+			buffer->stacklessBVHNodesCL = createBufferSafe(context, _stacklessBVH->nodes.data(), _stacklessBVH->nodes.size());
+			buffer->primitive_idsCL = createBufferSafe(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size());
 			
 			buffer->sphereBegin = _sphereBegin;
 			buffer->spheresCL = createBufferSafe(context, _spheres.data(), _spheres.size());

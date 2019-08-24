@@ -22,16 +22,16 @@ public:
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
 			
 
-			static int i = 0;
-			if (i++ % 50 == 0) {
-				int index = i;
-				auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
-				_thread.run([index, image]() {
-					char name[64];
-					sprintf(name, "render_%d.png", i);
-					ofSaveImage(*image, name);
-				});
-			}
+			//static int i = 0;
+			//if (i++ % 50 == 0) {
+			//	int index = i;
+			//	auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
+			//	_thread.run([index, image]() {
+			//		char name[64];
+			//		sprintf(name, "render_%d.png", i);
+			//		ofSaveImage(*image, name);
+			//	});
+			//}
 		}
 		_dirty = true;
 	}
@@ -85,7 +85,7 @@ void ofApp::initialize_render() {
 
 	RT_ASSERT(0 < context_ptr->deviceCount());
 
-	std::string abcPath = ofToDataPath("../../../scenes/wavefront_scene.abc", true);
+	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
 	houdini_alembic::AlembicStorage storage;
 	std::string error_message;
 	{
@@ -206,9 +206,9 @@ void ofApp::draw() {
 
 	ofSetColor(255);
 
-	if (_alembicscene && show_scene_preview) {
-		drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
-	}
+	//if (_alembicscene && show_scene_preview) {
+	//	drawAlembicScene(_alembicscene.get(), _camera_model, true /*draw camera*/);
+	//}
 
 	//static std::vector<WavefrontPath> wavefrontPath(kWavefrontPathCount);
 	//auto wavefrontLane = pt->_wavefrontLane.get();

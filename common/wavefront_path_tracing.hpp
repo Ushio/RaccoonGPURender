@@ -1113,10 +1113,18 @@ namespace rt {
 				if (auto polymesh = o.as_polygonMesh()) {
 					_sceneManager.addPolymesh(polymesh);
 				}
+			}
+
+			// It is order dependent, tooo bad
+			for (auto o : scene->objects) {
+				if (o->visible == false) {
+					continue;
+				}
 				if (auto point = o.as_point()) {
 					_sceneManager.addPoint(point);
 				}
 			}
+
 			RT_ASSERT(_camera);
 
 			BEG_PROFILE("Build BVH");

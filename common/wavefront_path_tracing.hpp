@@ -120,8 +120,6 @@ namespace rt {
 
 		}
 		void add(std::shared_ptr<OpenCLEvent> event) {
-			event->wait();
-
 			Item item;
 			item.event = event;
 			_queue.push(item);
@@ -875,9 +873,9 @@ namespace rt {
 				_avg_sample = (float)((double)all_sample_count / (w * h));
 			});
 
-			_eventQueue += enqueue_marker(_step_queue->queue());
-
+			auto marker = enqueue_marker(_step_queue->queue());
 			_step_queue->flush();
+			_eventQueue += marker;
 		}
 
 		// Finalize Process, copy _accum_color_intermediate_shared to _accum_color_intermediate

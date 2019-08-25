@@ -46,13 +46,16 @@ namespace rt {
 			const T *data() const {
 				return _elements.data();
 			}
+			void reserve(std::size_t s) {
+				_elements.reserve(s);
+			}
 		private:
 			std::vector<T> _elements;
 		};
 		std::unordered_map<type_index, std::shared_ptr<Storage>> _storages;
 
 		template <class T>
-		void add(const T &element, int materialType) {
+		StorageT<T> *storage_for() {
 			StorageT<T> *storage = nullptr;
 			auto it = _storages.find(typeid(T));
 			if (it == _storages.end()) {
@@ -62,7 +65,17 @@ namespace rt {
 			else {
 				storage = static_cast<StorageT<T> *>(it->second.get());
 			}
-
+			return storage;
+		}
+		template <class T>
+		void add(const T &element, int materialType) {
+			StorageT<T> *storage = storage_for<T>();
+			int index = storage->size();
+			materials.emplace_back(Material(materialType, index));
+			storage->add(element);
+		}
+		template <class T>
+		void add(StorageT<T> *storage, const T &element, int materialType) {
 			int index = storage->size();
 			materials.emplace_back(Material(materialType, index));
 			storage->add(element);
@@ -120,64 +133,111 @@ namespace rt {
 			}
 			return;
 		}
-		
-		for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
-			const std::string m = material_string->get(i);
 
-			using namespace rttr;
+		using namespace rttr;
 
-			type t = type::get_by_name(m);
+		std::vector<variant> variants(p->primitives.rowCount());
+		{
+			SCOPED_PROFILE("parallel_for variant()");
+			SET_PROFILE_DESC(p->name.c_str());
 
-			// fallback
-			if (t.is_valid() == false) {
-				storage->add(fallback_material(), kMaterialType_Lambertian);
-				continue;
-			}
-			// std::cout << t.get_name();
-			variant instance = t.create();
-			for (auto& prop : t.get_properties()) {
-				auto meta = prop.get_metadata(kGeoScopeKey);
-				RT_ASSERT(meta.is_valid());
+			tbb::parallel_for(tbb::blocked_range<int>(0, p->primitives.rowCount()), [&](const tbb::blocked_range<int> &range) {
+				for (int i = range.begin(); i < range.end(); ++i) {
+					const std::string m = material_string->get(i);
 
-				GeoScope scope = meta.get_value<GeoScope>();
-				auto value = prop.get_value(instance);
+					type t = type::get_by_name(m);
 
-				switch (scope)
-				{
-				//case rt::GeoScope::Vertices:
-				//	if (value.is_type<std::array<glm::vec3, 3>>()) {
-				//		if (auto v = p->vertices.column_as_vector3(prop.get_name().data())) {
-				//			std::array<glm::vec3, 3> value;
-				//			for (int j = 0; j < value.size(); ++j) {
-				//				v->get(i * 3 + j, glm::value_ptr(value[j]));
-				//			}
-				//			prop.set_value(instance, value);
-				//		}
-				//	}
-				//	break;
-				case rt::GeoScope::Primitives:
-					if (value.is_type<OpenCLFloat3>()) {
-						if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
-							glm::vec3 value;
-							v->get(i, glm::value_ptr(value));
-							prop.set_value(instance, OpenCLFloat3(value));
+					RT_ASSERT(t.is_valid());
+
+					variant instance = t.create();
+					for (auto& prop : t.get_properties()) {
+						auto meta = prop.get_metadata(kGeoScopeKey);
+						RT_ASSERT(meta.is_valid());
+
+						GeoScope scope = meta.get_value<GeoScope>();
+						auto value = prop.get_value(instance);
+
+						switch (scope)
+						{
+						case rt::GeoScope::Primitives:
+							if (value.is_type<OpenCLFloat3>()) {
+								if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
+									glm::vec3 value;
+									v->get(i, glm::value_ptr(value));
+									prop.set_value(instance, OpenCLFloat3(value));
+								}
+							}
+							else if (value.is_type<int>()) {
+								if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
+									prop.set_value(instance, v->get(i));
+								}
+							}
+							else if (value.is_type<float>()) {
+								if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
+									prop.set_value(instance, v->get(i));
+								}
+							}
+							break;
 						}
 					}
-					else if (value.is_type<int>()) {
-						if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
-							prop.set_value(instance, v->get(i));
-						}
-					}
-					else if (value.is_type<float>()) {
-						if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
-							prop.set_value(instance, v->get(i));
-						}
-					}
-					break;
+					variants[i] = instance;
 				}
-			}
-			storage->add_variant(instance);
+			});
 		}
+
+		{
+			SCOPED_PROFILE("add variant()");
+			SET_PROFILE_DESC(p->name.c_str());
+			for (auto v : variants) {
+				storage->add_variant(v);
+			}
+		}
+
+		//for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
+		//	const std::string m = material_string->get(i);
+
+
+		//	type t = type::get_by_name(m);
+
+		//	// fallback
+		//	//if (t.is_valid() == false) {
+		//	//	storage->add(fallback_material(), kMaterialType_Lambertian);
+		//	//	continue;
+		//	//}
+		//	// std::cout << t.get_name();
+		//	variant instance = t.create();
+		//	for (auto& prop : t.get_properties()) {
+		//		auto meta = prop.get_metadata(kGeoScopeKey);
+		//		RT_ASSERT(meta.is_valid());
+
+		//		GeoScope scope = meta.get_value<GeoScope>();
+		//		auto value = prop.get_value(instance);
+
+		//		switch (scope)
+		//		{
+		//		case rt::GeoScope::Primitives:
+		//			if (value.is_type<OpenCLFloat3>()) {
+		//				if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
+		//					glm::vec3 value;
+		//					v->get(i, glm::value_ptr(value));
+		//					prop.set_value(instance, OpenCLFloat3(value));
+		//				}
+		//			}
+		//			else if (value.is_type<int>()) {
+		//				if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
+		//					prop.set_value(instance, v->get(i));
+		//				}
+		//			}
+		//			else if (value.is_type<float>()) {
+		//				if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
+		//					prop.set_value(instance, v->get(i));
+		//				}
+		//			}
+		//			break;
+		//		}
+		//	}
+		//	storage->add_variant(instance);
+		//}
 	}
 
 
@@ -290,13 +350,25 @@ namespace rt {
 			}
 
 			_spheres.reserve(_spheres.size() + p->P.size());
-			for (int i = 0; i < p->P.size(); ++i) {
-				auto srcP = p->P[i];
-				auto radius = pscale->get(i);
-				glm::vec3 p = xform * glm::dvec4(srcP.x, srcP.y, srcP.z, 1.0f);
-				OpenCLFloat4 sphere;
-				sphere = glm::vec4(p, radius);
-				_spheres.emplace_back(sphere);
+
+			if (glm::dmat4() == xform) {
+				for (int i = 0; i < p->P.size(); ++i) {
+					auto srcP = p->P[i];
+					auto radius = pscale->get(i);
+					OpenCLFloat4 sphere;
+					sphere = glm::vec4(srcP.x, srcP.y, srcP.z, radius);
+					_spheres.emplace_back(sphere);
+				}
+			}
+			else {
+				for (int i = 0; i < p->P.size(); ++i) {
+					auto srcP = p->P[i];
+					auto radius = pscale->get(i);
+					glm::vec3 p = xform * glm::dvec4(srcP.x, srcP.y, srcP.z, 1.0f);
+					OpenCLFloat4 sphere;
+					sphere = glm::vec4(p, radius);
+					_spheres.emplace_back(sphere);
+				}
 			}
 
 			// fallback
@@ -310,14 +382,16 @@ namespace rt {
 					_material_storage->add(fallback_material(), kMaterialType_Lambertian);
 				}
 			} else {
+				auto storage = _material_storage->storage_for<Lambertian>();
+				storage->reserve(storage->size() + p->P.size());
+
 				for (int i = 0; i < p->P.size(); ++i) {
 					glm::vec3 Cd = glm::vec3(0.0f);
 					colors->get(i, glm::value_ptr(Cd));
 					Lambertian lambert(glm::vec3(), Cd, false);
-					_material_storage->add(lambert, kMaterialType_Lambertian);
+					_material_storage->add(storage, lambert, kMaterialType_Lambertian);
 				}
 			}
-
 		}
 		void addPoint(houdini_alembic::PointObject *p) {
 			auto point_type = p->points.column_as_string("point_type");
@@ -363,13 +437,24 @@ namespace rt {
 						SCOPED_PROFILE("create envmap sampler");
 						SET_PROFILE_DESC(filename.c_str());
 						UniformDirectionWeight uniform_weight;
-						_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
-						_sixAxisImageEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XPlus)));
-						_sixAxisImageEnvmap[1] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XMinus)));
-						_sixAxisImageEnvmap[2] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YPlus)));
-						_sixAxisImageEnvmap[3] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YMinus)));
-						_sixAxisImageEnvmap[4] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZPlus)));
-						_sixAxisImageEnvmap[5] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZMinus)));
+
+						//_imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight));
+						//_sixAxisImageEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XPlus)));
+						//_sixAxisImageEnvmap[1] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XMinus)));
+						//_sixAxisImageEnvmap[2] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YPlus)));
+						//_sixAxisImageEnvmap[3] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YMinus)));
+						//_sixAxisImageEnvmap[4] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZPlus)));
+						//_sixAxisImageEnvmap[5] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZMinus)));
+
+						tbb::task_group worker;
+						worker.run([&]() { _imageEnvmap = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, uniform_weight)); });
+						worker.run([&]() { _sixAxisImageEnvmap[0] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XPlus)));  });
+						worker.run([&]() { _sixAxisImageEnvmap[1] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_XMinus))); });
+						worker.run([&]() { _sixAxisImageEnvmap[2] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YPlus)));  });
+						worker.run([&]() { _sixAxisImageEnvmap[3] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_YMinus))); });
+						worker.run([&]() { _sixAxisImageEnvmap[4] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZPlus)));  });
+						worker.run([&]() { _sixAxisImageEnvmap[5] = std::shared_ptr<ImageEnvmap>(new ImageEnvmap(_envmapImage, SixAxisDirectionWeight(CubeSection_ZMinus))); });
+						worker.wait();
 					}
 				}
 			}

@@ -15,7 +15,7 @@
 #include <CL/cl_platform.h>
 
 #define USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION 1
-#define USE_PPL_AT_CREATE_CONTEXT 0
+#define USE_PPL_AT_CREATE_CONTEXT 1
 
 #if USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION
 #include <intrin.h>

@@ -5,6 +5,7 @@
 #include <future>
 #include <glm/glm.hpp>
 #include <tbb/task_group.h>
+#include <tbb/tbb.h>
 
 #include "raccoon_ocl.hpp"
 #include "peseudo_random.hpp"
@@ -1134,12 +1135,12 @@ namespace rt {
 			// ALL Device
 			//for (int i = 0; i < context->deviceCount(); ++i) {
 			//	auto lane = context->lane(i);
-			//	//if (lane.is_gpu == false) {
-			//	//	continue;
-			//	//}
-			//	//if (lane.is_discrete_memory == false) {
-			//	//	continue;
-			//	//}
+			//	if (lane.is_gpu == false) {
+			//		continue;
+			//	}
+			//	if (lane.is_discrete_memory == false) {
+			//		continue;
+			//	}
 			//	int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
 			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
 			//	wavefront_lane->initialize(i);

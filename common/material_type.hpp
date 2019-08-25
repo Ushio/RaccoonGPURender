@@ -33,9 +33,11 @@ namespace rt {
 		OpenCLFloat3 Le = glm::vec3(0.0f);
 		OpenCLFloat3 R  = glm::vec3(1.0f);
 		int BackEmission = 0;
+
 		//std::array<glm::vec3, 3> Nv;
 		//int ShadingNormal = 0;
 	};
+
 	class Specular {
 	public:
 		Specular() { }
@@ -61,6 +63,36 @@ namespace rt {
 		float C = 1.0f;
 		OpenCLFloat3 R = glm::vec3(1.0f);
 	};
+
+	union MaterialUnion {
+		MaterialUnion() {}
+		Lambertian lambertian;
+		Specular specular;
+		Dierectric dierectric;
+		Ward ward;
+		HomogeneousVolume homogeneousVolume;
+	};
+
+	inline void construct_Lambertian(rttr::variant *v, MaterialUnion *u) {
+		u->lambertian = Lambertian();
+		*v = rttr::variant(&u->lambertian);
+	}
+	inline void construct_Specular(rttr::variant *v, MaterialUnion *u) {
+		u->specular = Specular();
+		*v = rttr::variant(&u->specular);
+	}
+	inline void construct_Dierectric(rttr::variant *v, MaterialUnion *u) {
+		u->dierectric = Dierectric();
+		*v = rttr::variant(&u->dierectric);
+	}
+	inline void construct_Ward(rttr::variant *v, MaterialUnion *u) {
+		u->ward = Ward();
+		*v = rttr::variant(&u->ward);
+	}
+	inline void construct_HomogeneousVolume(rttr::variant *v, MaterialUnion *u) {
+		u->homogeneousVolume = HomogeneousVolume();
+		*v = rttr::variant(&u->homogeneousVolume);
+	}
 
 	RTTR_REGISTRATION
 	{
@@ -91,5 +123,11 @@ namespace rt {
 		.constructor<>()
 		.property("C", &HomogeneousVolume::C)(metadata(kGeoScopeKey, GeoScope::Primitives))
 		.property("Cd", &HomogeneousVolume::R)(metadata(kGeoScopeKey, GeoScope::Primitives));
+
+		registration::method("construct_Lambertian", &construct_Lambertian);
+		registration::method("construct_Specular", &construct_Specular);
+		registration::method("construct_Dierectric", &construct_Dierectric);
+		registration::method("construct_Ward", &construct_Ward);
+		registration::method("construct_HomogeneousVolume", &construct_HomogeneousVolume);
 	}
 }

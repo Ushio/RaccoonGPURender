@@ -22,16 +22,16 @@ public:
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
 			
 
-			//static int i = 0;
-			//if (i++ % 50 == 0) {
-			//	int index = i;
-			//	auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
-			//	_thread.run([index, image]() {
-			//		char name[64];
-			//		sprintf(name, "render_%d.png", i);
-			//		ofSaveImage(*image, name);
-			//	});
-			//}
+			static int i = 0;
+			if (i++ % 50 == 0) {
+				int index = i;
+				auto image = std::shared_ptr<ofPixels>(new ofPixels(_imagedata));
+				_thread.run([index, image]() {
+					char name[64];
+					sprintf(name, "render_%d.png", i);
+					ofSaveImage(*image, name);
+				});
+			}
 		}
 		_dirty = true;
 	}
@@ -55,8 +55,38 @@ private:
 ImageRecieverForOF colorReciever;
 ImageRecieverForOF normalReciever;
 
+
+//rttr::variant make_variant(const std::string &name) {
+//	rttr::type::get("test_class").create()
+//}
+
+
+
 //--------------------------------------------------------------
 void ofApp::setup() {
+	// Lambertian l;
+	// rttr::variant instance(&l);
+
+	//MaterialUnion u;
+	//rttr::variant v;
+	//rttr::type::invoke("construct_Lambertian", { &v, &u });
+
+	//bool is = v.is_type<Lambertian *>();
+
+	//MaterialUnion storage;
+	//rttr::type t = v.get_type();
+
+	//for (auto& prop : t.get_properties()) {
+	//	auto meta = prop.get_metadata(kGeoScopeKey);
+
+	//	auto value = prop.get_value(v);
+
+	//	if (value.is_type<OpenCLFloat3>()) {
+	//		glm::vec3 value(1, 2, 3);
+	//		prop.set_value(v, OpenCLFloat3(value));
+	//	}
+	//}
+
 	ofSetVerticalSync(false);
 	ofSetFrameRate(30);
 

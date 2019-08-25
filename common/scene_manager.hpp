@@ -94,20 +94,38 @@ namespace rt {
 		}
 
 		void add_variant(const rttr::variant &instance) {
-			if (instance.is_type<std::shared_ptr<Lambertian>>()) {
-				add(*instance.get_value<std::shared_ptr<Lambertian>>(), kMaterialType_Lambertian);
+			//if (instance.is_type<std::shared_ptr<Lambertian>>()) {
+			//	add(*instance.get_value<std::shared_ptr<Lambertian>>(), kMaterialType_Lambertian);
+			//}
+			//else if (instance.is_type<std::shared_ptr<Specular>>()) {
+			//	add(*instance.get_value<std::shared_ptr<Specular>>(), kMaterialType_Specular);
+			//}
+			//else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
+			//	add(*instance.get_value<std::shared_ptr<Dierectric>>(), kMaterialType_Dierectric);
+			//}
+			//else if (instance.is_type<std::shared_ptr<Ward>>()) {
+			//	add(*instance.get_value<std::shared_ptr<Ward>>(), kMaterialType_Ward);
+			//}
+			//else if (instance.is_type<std::shared_ptr<HomogeneousVolume>>()) {
+			//	add(*instance.get_value<std::shared_ptr<HomogeneousVolume>>(), kMaterialType_HomogeneousVolume);
+			//}
+			//else {
+			//	RT_ASSERT(0);
+			//}
+			if (instance.is_type<Lambertian*>()) {
+				add(*instance.get_value<Lambertian*>(), kMaterialType_Lambertian);
 			}
-			else if (instance.is_type<std::shared_ptr<Specular>>()) {
-				add(*instance.get_value<std::shared_ptr<Specular>>(), kMaterialType_Specular);
+			else if (instance.is_type<Specular*>()) {
+				add(*instance.get_value<Specular*>(), kMaterialType_Specular);
 			}
-			else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
-				add(*instance.get_value<std::shared_ptr<Dierectric>>(), kMaterialType_Dierectric);
+			else if (instance.is_type<Dierectric*>()) {
+				add(*instance.get_value<Dierectric*>(), kMaterialType_Dierectric);
 			}
-			else if (instance.is_type<std::shared_ptr<Ward>>()) {
-				add(*instance.get_value<std::shared_ptr<Ward>>(), kMaterialType_Ward);
+			else if (instance.is_type<Ward*>()) {
+				add(*instance.get_value<Ward*>(), kMaterialType_Ward);
 			}
-			else if (instance.is_type<std::shared_ptr<HomogeneousVolume>>()) {
-				add(*instance.get_value<std::shared_ptr<HomogeneousVolume>>(), kMaterialType_HomogeneousVolume);
+			else if (instance.is_type<HomogeneousVolume*>()) {
+				add(*instance.get_value<HomogeneousVolume*>(), kMaterialType_HomogeneousVolume);
 			}
 			else {
 				RT_ASSERT(0);
@@ -135,21 +153,27 @@ namespace rt {
 		}
 
 		using namespace rttr;
-
-		std::vector<variant> variants(p->primitives.rowCount());
+		std::vector<variant>       variants       (p->primitives.rowCount());
+		std::vector<MaterialUnion> variants_memory(p->primitives.rowCount());
 		{
 			SCOPED_PROFILE("parallel_for variant()");
 			SET_PROFILE_DESC(p->name.c_str());
 
 			tbb::parallel_for(tbb::blocked_range<int>(0, p->primitives.rowCount()), [&](const tbb::blocked_range<int> &range) {
+				std::string construct;
 				for (int i = range.begin(); i < range.end(); ++i) {
 					const std::string m = material_string->get(i);
 
-					type t = type::get_by_name(m);
+					construct.clear();
+					construct += "construct_";
+					construct += m;
+					rttr::type::invoke(construct, { &variants[i], &variants_memory[i] });
+					type t = variants[i].get_type();
+
+					variant &instance = variants[i];
 
 					RT_ASSERT(t.is_valid());
 
-					variant instance = t.create();
 					for (auto& prop : t.get_properties()) {
 						auto meta = prop.get_metadata(kGeoScopeKey);
 						RT_ASSERT(meta.is_valid());
@@ -180,7 +204,6 @@ namespace rt {
 							break;
 						}
 					}
-					variants[i] = instance;
 				}
 			});
 		}
@@ -192,52 +215,6 @@ namespace rt {
 				storage->add_variant(v);
 			}
 		}
-
-		//for (uint32_t i = 0, n = p->primitives.rowCount(); i < n; ++i) {
-		//	const std::string m = material_string->get(i);
-
-
-		//	type t = type::get_by_name(m);
-
-		//	// fallback
-		//	//if (t.is_valid() == false) {
-		//	//	storage->add(fallback_material(), kMaterialType_Lambertian);
-		//	//	continue;
-		//	//}
-		//	// std::cout << t.get_name();
-		//	variant instance = t.create();
-		//	for (auto& prop : t.get_properties()) {
-		//		auto meta = prop.get_metadata(kGeoScopeKey);
-		//		RT_ASSERT(meta.is_valid());
-
-		//		GeoScope scope = meta.get_value<GeoScope>();
-		//		auto value = prop.get_value(instance);
-
-		//		switch (scope)
-		//		{
-		//		case rt::GeoScope::Primitives:
-		//			if (value.is_type<OpenCLFloat3>()) {
-		//				if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
-		//					glm::vec3 value;
-		//					v->get(i, glm::value_ptr(value));
-		//					prop.set_value(instance, OpenCLFloat3(value));
-		//				}
-		//			}
-		//			else if (value.is_type<int>()) {
-		//				if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
-		//					prop.set_value(instance, v->get(i));
-		//				}
-		//			}
-		//			else if (value.is_type<float>()) {
-		//				if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
-		//					prop.set_value(instance, v->get(i));
-		//				}
-		//			}
-		//			break;
-		//		}
-		//	}
-		//	storage->add_variant(instance);
-		//}
 	}
 
 

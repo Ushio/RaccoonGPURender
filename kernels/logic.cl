@@ -102,7 +102,7 @@ __kernel void logic(
         
         // if miss intersect then rd is old dir, otherwise new direction sampled by material stage
         float3 rd = wavefrontPath[gid].rd;
-        float3 emission = get_envmap_value(envmap, rd);
+        float3 emission = get_envmap_value(envmap, rd, logic_i == 0);
         L += T * emission;
     }
 

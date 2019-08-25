@@ -33,7 +33,7 @@ void cartesian_to_polar(float3 rd, float *theta, float *phi) {
     }
 }
 
-float3 get_envmap_value(__read_only image2d_t envmap, float3 rd) {
+float3 get_envmap_value(__read_only image2d_t envmap, float3 rd, bool use_filter) {
     float theta, phi;
     cartesian_to_polar(rd, &theta, &phi);
     
@@ -42,10 +42,13 @@ float3 get_envmap_value(__read_only image2d_t envmap, float3 rd) {
     float u = 1.0f - phi / (2.0f * pi);
     float v = theta / pi;
 
-    // CLK_FILTER_LINEAR, CLK_ADDRESS_REPEAT
-    const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
-    // const sampler_t s = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_LINEAR;
-    return read_imagef(envmap, s, (float2)(u, v)).xyz;
+    const sampler_t no_filter = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_NEAREST;
+    const sampler_t filter = CLK_NORMALIZED_COORDS_TRUE | CLK_ADDRESS_REPEAT | CLK_FILTER_LINEAR;
+    
+    if(use_filter) {
+        return read_imagef(envmap, filter, (float2)(u, v)).xyz;
+    }
+    return read_imagef(envmap, no_filter, (float2)(u, v)).xyz;
 }
 
 uint alias_method(uint4 *state, __global const AliasBucket *aliasBuckets, uint aliasBucketsCount) {

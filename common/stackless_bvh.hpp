@@ -1,12 +1,13 @@
 ﻿#pragma once
 
 #include <functional>
+#include <mutex>
 #include <glm/glm.hpp>
 
 #include <embree3/rtcore.h>
 #include "assertion.hpp"
-
-
+#include <tbb/task_group.h>
+#include "timeline_profiler.hpp"
 namespace rt {
 	typedef struct {
 		OpenCLFloat3 lower;
@@ -278,17 +279,19 @@ namespace rt {
 		std::vector<uint32_t> primitive_ids;
 		std::vector<StacklessBVHNode> nodes;
 	};
-	inline void allocate_stacklessBVH(std::vector<StacklessBVHNode> &nodes, BVHNode *bvh) {
-		uint32_t index = nodes.size();
-		nodes.emplace_back(StacklessBVHNode());
+	// needs resize as size
+	inline void allocate_stacklessBVH(BVHNode *bvh, int *size) {
+		uint32_t index = (*size);
+		(*size)++;
 		bvh->index_for_array_storage = index;
 
 		if (BVHBranch *branch = bvh->branch()) {
-			allocate_stacklessBVH(nodes, branch->L);
-			allocate_stacklessBVH(nodes, branch->R);
+			allocate_stacklessBVH(branch->L, size);
+			allocate_stacklessBVH(branch->R, size);
 		}
 	}
-	inline void build_stacklessBVH(std::vector<StacklessBVHNode> &nodes, std::vector<uint32_t> &primitive_ids, BVHNode *node, AABB *top_aabb) {
+
+	inline void build_stacklessBVH(std::vector<StacklessBVHNode> &nodes, std::vector<uint32_t> &primitive_ids, BVHNode *node, AABB *top_aabb, int depth = 0) {
 		int me = node->index_for_array_storage;
 		if (node->parent) {
 			nodes[me].link_parent = node->parent->index_for_array_storage;
@@ -309,8 +312,8 @@ namespace rt {
 			nodes[L].link_sibling = R;
 			nodes[R].link_sibling = L;
 
-			build_stacklessBVH(nodes, primitive_ids, branch->L, top_aabb);
-			build_stacklessBVH(nodes, primitive_ids, branch->R, top_aabb);
+			build_stacklessBVH(nodes, primitive_ids, branch->L, top_aabb, depth + 1);
+			build_stacklessBVH(nodes, primitive_ids, branch->R, top_aabb, depth + 1);
 		}
 		else {
 			// setup primitives
@@ -324,8 +327,16 @@ namespace rt {
 	}
 	inline StacklessBVH *create_stackless_bvh(EmbreeBVH *bvh) {
 		StacklessBVH *stacklessBVH = new StacklessBVH();
-		allocate_stacklessBVH(stacklessBVH->nodes, bvh->bvh_root);
-		build_stacklessBVH(stacklessBVH->nodes, stacklessBVH->primitive_ids, bvh->bvh_root, &stacklessBVH->top_aabb);
+		{
+			SCOPED_PROFILE("allocate_stacklessBVH()");
+			int size = 0;
+			allocate_stacklessBVH(bvh->bvh_root, &size);
+			stacklessBVH->nodes.resize(size);
+		}
+		{
+			SCOPED_PROFILE("build_stacklessBVH()");
+			build_stacklessBVH(stacklessBVH->nodes, stacklessBVH->primitive_ids, bvh->bvh_root, &stacklessBVH->top_aabb);
+		}
 		return stacklessBVH;
 	}
 

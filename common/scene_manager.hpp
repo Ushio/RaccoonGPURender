@@ -507,8 +507,14 @@ namespace rt {
 				primitives.emplace_back(prim);
 			}
 
-			_embreeBVH = std::shared_ptr<EmbreeBVH>(create_embreeBVH(primitives));
-			_stacklessBVH = std::shared_ptr<StacklessBVH>(create_stackless_bvh(_embreeBVH.get()));
+			{
+				SCOPED_PROFILE("create_embreeBVH()");
+				_embreeBVH = std::shared_ptr<EmbreeBVH>(create_embreeBVH(primitives));
+			}
+			{
+				SCOPED_PROFILE("create_stackless_bvh()");
+				_stacklessBVH = std::shared_ptr<StacklessBVH>(create_stackless_bvh(_embreeBVH.get()));
+			}
 		}
 
 		std::unique_ptr<SceneBuffer> createBuffer(cl_context context) const {

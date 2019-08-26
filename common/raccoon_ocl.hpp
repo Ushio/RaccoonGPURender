@@ -335,6 +335,10 @@ namespace rt {
 			: _context(context)
 			, _length(length) {
 
+			// static uint64_t memory_usage = 0;
+			// memory_usage += sizeof(T) * length;
+			// printf("memory_usage=%lld, alloc=%d\n", memory_usage, sizeof(T) * length);
+
 			cl_mem_flags mem_flags = CL_MEM_READ_WRITE;
 			switch (mode) {
 			case OpenCLKernelBufferMode::ReadWrite:
@@ -815,6 +819,7 @@ namespace rt {
 				global_work_size  /*global_work_size*/,
 				nullptr           /*local_work_size*/,
 				event_list.size(), event_list.events(), &kernel_event);
+			if (status != CL_SUCCESS) { printf("status=%d\n", status); };
 			RAC_ASSERT(status == CL_SUCCESS, "clEnqueueNDRangeKernel() failed");
 			//status = clFlush(queue);
 			//RAC_ASSERT(status == CL_SUCCESS, "clFlush() failed");

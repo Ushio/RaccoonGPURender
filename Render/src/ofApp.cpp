@@ -91,7 +91,11 @@ void ofApp::exit() {
 
 //--------------------------------------------------------------
 void ofApp::update() {
-
+	static bool is_exit = false;
+	if (is_exit == false && 57 < ofGetElapsedTimef()) {
+		ofExit();
+		is_exit = true;
+	}
 }
 
 //--------------------------------------------------------------

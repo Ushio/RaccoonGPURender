@@ -533,7 +533,7 @@ namespace rt {
 			bool is_gpu;
 			bool has_unified_memory;
 		};
-		OpenCLContext() {
+		OpenCLContext(bool skipCPU = true) {
 			cl_int status;
 			cl_uint numOfPlatforms;
 			status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
@@ -588,32 +588,41 @@ namespace rt {
 					status = clGetDeviceInfo(device_id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, nullptr);
 					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
 
-					// CL_DEVICE_PARTITION_EQUALLY
-					if (device_info.is_gpu == false) {
-						size_t partition_type_length;
-						cl_device_partition_property partitions[4];
-						status = clGetDeviceInfo(device_id, CL_DEVICE_PARTITION_PROPERTIES, sizeof(partitions), partitions, &partition_type_length);
-						bool is_support_partition = std::any_of(partitions, partitions + partition_type_length, [](cl_device_partition_property p) {
-							return p == CL_DEVICE_PARTITION_BY_COUNTS;
-						});
-						if (is_support_partition) {
-							int sub_compute_unit = compute_units / 2;
-							cl_device_partition_property pertition_properties[] = {
-								CL_DEVICE_PARTITION_BY_COUNTS, sub_compute_unit, CL_DEVICE_PARTITION_BY_COUNTS_LIST_END, 0
-							};
-							cl_device_id sub_device_id;
-							cl_uint num_devices;
-							status = clCreateSubDevices(device_id, pertition_properties, sizeof(sub_device_id), &sub_device_id, &num_devices);
-							RAC_ASSERT(status == CL_SUCCESS, "clCreateSubDevices() failed");
-							RAC_ASSERT(num_devices == 1, "clCreateSubDevices() failed");
-							
-							// override by sub device
-							device_id = sub_device_id;
+					if (skipCPU) {
+						if (device_info.is_gpu == false) {
+							continue;
 						}
-						else {
+						if (device_info.has_unified_memory) {
 							continue;
 						}
 					}
+
+					// CL_DEVICE_PARTITION_EQUALLY
+					//if (device_info.is_gpu == false) {
+					//	size_t partition_type_length;
+					//	cl_device_partition_property partitions[4];
+					//	status = clGetDeviceInfo(device_id, CL_DEVICE_PARTITION_PROPERTIES, sizeof(partitions), partitions, &partition_type_length);
+					//	bool is_support_partition = std::any_of(partitions, partitions + partition_type_length, [](cl_device_partition_property p) {
+					//		return p == CL_DEVICE_PARTITION_BY_COUNTS;
+					//	});
+					//	if (is_support_partition) {
+					//		int sub_compute_unit = compute_units / 2;
+					//		cl_device_partition_property pertition_properties[] = {
+					//			CL_DEVICE_PARTITION_BY_COUNTS, sub_compute_unit, CL_DEVICE_PARTITION_BY_COUNTS_LIST_END, 0
+					//		};
+					//		cl_device_id sub_device_id;
+					//		cl_uint num_devices;
+					//		status = clCreateSubDevices(device_id, pertition_properties, sizeof(sub_device_id), &sub_device_id, &num_devices);
+					//		RAC_ASSERT(status == CL_SUCCESS, "clCreateSubDevices() failed");
+					//		RAC_ASSERT(num_devices == 1, "clCreateSubDevices() failed");
+					//		
+					//		// override by sub device
+					//		device_id = sub_device_id;
+					//	}
+					//	else {
+					//		continue;
+					//	}
+					//}
 
 					{
 						DeviceContext deviceContext;

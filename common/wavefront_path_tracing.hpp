@@ -1093,9 +1093,13 @@ namespace rt {
 		std::unique_ptr<PeriodicReadableBuffer<uint32_t>> _all_sample_count;
 	};
 
+	enum RenderMode {
+		RenderMode_SingleGPU,
+		RenderMode_ALLGPU,
+	};
 	class WavefrontPathTracing {
 	public:
-		WavefrontPathTracing(OpenCLContext *context, std::shared_ptr<houdini_alembic::AlembicScene> scene, std::filesystem::path alembicDirectory)
+		WavefrontPathTracing(OpenCLContext *context, std::shared_ptr<houdini_alembic::AlembicScene> scene, std::filesystem::path alembicDirectory, RenderMode renderMode)
 			:_context(context)
 			,_scene(scene) {
 			SCOPED_PROFILE("WavefrontPathTracing()");
@@ -1133,48 +1137,45 @@ namespace rt {
 			END_PROFILE();
 
 			// ALL Device
-			//for (int i = 0; i < context->deviceCount(); ++i) {
-			//	auto lane = context->lane(i);
-			//	if (lane.is_gpu == false) {
-			//		continue;
-			//	}
-			//	if (lane.is_discrete_memory == false) {
-			//		continue;
-			//	}
-			//	int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-			//	wavefront_lane->initialize(i);
-			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-			//}
+			if (renderMode == RenderMode_ALLGPU) {
+				tbb::task_group g;
+				std::mutex m;
 
-			for (int i = 0; i < 1; ++i) {
-				auto lane = context->lane(i);
-				if (lane.is_gpu == false) {
-					continue;
+				for (int i = 0; i < context->deviceCount(); ++i) {
+					auto lane = context->lane(i);
+					if (lane.is_gpu == false) {
+						continue;
+					}
+					if (lane.is_discrete_memory == false) {
+						continue;
+					}
+					g.run([&]() {
+						int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
+						auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
+						wavefront_lane->initialize(i);
+
+						std::lock_guard<std::mutex> lc(m);
+						_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+					});
 				}
-				if (lane.is_discrete_memory == false) {
-					continue;
-				}
-				int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-				auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-				wavefront_lane->initialize(i);
-				_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+
+				g.wait();
 			}
-
-			// std::swap(_wavefront_lanes[0], _wavefront_lanes[1]);
-
-			//for (int i = 0; i < context->deviceCount(); ++i) {
-			//	auto lane = context->lane(i);
-			//	if (lane.is_gpu == false) {
-			//		continue;
-			//	}
-			//	if (i == 1) {
-			//		continue;
-			//	}
-			//	auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, kWavefrontPathCountGPU));
-			//	wavefront_lane->initialize(i);
-			//	_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-			//}
+			else {
+				for (int i = 0; i < 1; ++i) {
+					auto lane = context->lane(i);
+					if (lane.is_gpu == false) {
+						continue;
+					}
+					if (lane.is_discrete_memory == false) {
+						continue;
+					}
+					int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
+					auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
+					wavefront_lane->initialize(i);
+					_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+				}
+			}
 		}
 		~WavefrontPathTracing() {
 			_continue = false;
@@ -1250,7 +1251,7 @@ namespace rt {
 			}
 		}
 
-		void launch() {
+		void launch(int margin_period_ms) {
 			stopwatch_after_launch = Stopwatch();
 
 			_continue = true;
@@ -1265,7 +1266,7 @@ namespace rt {
 			}
 
 			// create image
-			_workers.emplace_back([this]() {
+			_workers.emplace_back([this, margin_period_ms]() {
 				while (_continue) {
 					int max_step = 0;
 					for (int i = 0; i < _wavefront_lanes.size(); ++i) {
@@ -1276,7 +1277,8 @@ namespace rt {
 						create_color_image();
 						// printf("create_color_image %f \n", sw.elapsed());
 					}
-					std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(margin_period_ms));
 				}
 			});
 		}

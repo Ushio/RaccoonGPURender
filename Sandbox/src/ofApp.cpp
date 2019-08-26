@@ -148,7 +148,7 @@ void ofApp::initialize_render() {
 	//	delete pt;
 	//}
 
-	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory);
+	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory, RenderMode_SingleGPU);
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
@@ -156,7 +156,7 @@ void ofApp::initialize_render() {
 	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
 	//	normalReciever.setImageAtomic(p, w, h);
 	//};
-	pt->launch();
+	pt->launch(50);
 
 	END_PROFILE();
 	SAVE_PROFILE(ofToDataPath("initialize_profile.json").c_str());

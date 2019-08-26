@@ -412,6 +412,9 @@
     <ClCompile Include="..\libs\abc\ImathVec_ImathVec.cpp">
       <Filter>src\abc</Filter>
     </ClCompile>
+    <ClCompile Include="..\libs\stb\stb.cpp">
+      <Filter>src\stb</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">
@@ -425,6 +428,9 @@
     </Filter>
     <Filter Include="src\abc">
       <UniqueIdentifier>{d4b8c6fd-6448-48f3-90c4-d57677629802}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\stb">
+      <UniqueIdentifier>{f6d0b8eb-ba1b-4fe2-9925-26b399f2060c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -1108,6 +1114,12 @@
     </ClInclude>
     <ClInclude Include="..\libs\abc\toFloat.h">
       <Filter>src\abc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\stb\stb_image.h">
+      <Filter>src\stb</Filter>
+    </ClInclude>
+    <ClInclude Include="..\libs\stb\stb_image_write.h">
+      <Filter>src\stb</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

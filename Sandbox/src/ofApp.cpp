@@ -55,13 +55,6 @@ private:
 ImageRecieverForOF colorReciever;
 ImageRecieverForOF normalReciever;
 
-
-//rttr::variant make_variant(const std::string &name) {
-//	rttr::type::get("test_class").create()
-//}
-
-
-
 //--------------------------------------------------------------
 void ofApp::setup() {
 	// Lambertian l;
@@ -110,45 +103,12 @@ void ofApp::initialize_render() {
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
-
-	context_ptr = new OpenCLContext();
-
-	RT_ASSERT(0 < context_ptr->deviceCount());
-
 	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
-	houdini_alembic::AlembicStorage storage;
-	std::string error_message;
-	{
-		SCOPED_PROFILE("Open Alembic");
-		storage.open(abcPath, error_message);
-	}
+	// pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU);
+	pt = new WavefrontPathTracing(abcPath, RenderMode_SingleGPU);
 
-	if (storage.isOpened()) {
-		SCOPED_PROFILE("Read Alembic Frame");
-		_alembicscene = storage.read(0, error_message);
-	}
-	if (error_message.empty() == false) {
-		printf("sample error_message: %s\n", error_message.c_str());
-	}
+	context_ptr = pt->context();
 
-	std::filesystem::path abcDirectory(abcPath);
-	abcDirectory.remove_filename();
-
-	//for (int i = 0; i < 5; ++i) {
-	//	printf("%d\n", i);
-	//	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory);
-	//	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
-	//		colorReciever.setImageAtomic(p, w, h);
-	//	};
-	//	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
-	//	//	normalReciever.setImageAtomic(p, w, h);
-	//	//};
-	//	pt->launch();
-	//	// Sleep(2000);
-	//	delete pt;
-	//}
-
-	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory, RenderMode_SingleGPU);
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		colorReciever.setImageAtomic(p, w, h);
 	};
@@ -171,8 +131,6 @@ void ofApp::exit() {
 
 	delete pt;
 	pt = nullptr;
-	delete context_ptr;
-	context_ptr = nullptr;
 
 	ofxRaccoonImGui::shutdown();
 }

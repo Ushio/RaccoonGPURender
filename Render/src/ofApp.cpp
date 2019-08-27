@@ -23,43 +23,9 @@ void ofApp::initialize_render() {
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
-
-	context_ptr = new OpenCLContext();
-
-	printf("initialized context, %.2f s\n", ofGetElapsedTimef());
-
-	int deviceCount = context_ptr->deviceCount();
-	for (int device_index = 0; device_index < deviceCount; ++device_index) {
-		auto info = context_ptr->device_info(device_index);
-		printf("-- device[%d] (%s) --\n", device_index, info.name.c_str());
-
-		printf("%s\n", info.version.c_str());
-		printf("type : %s\n", info.is_gpu ? "GPU" : "CPU");
-		printf("has unified memory : %s\n", info.has_unified_memory ? "YES" : "NO");
-	}
-
-	RT_ASSERT(0 < context_ptr->deviceCount());
-
 	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
-	houdini_alembic::AlembicStorage storage;
-	std::string error_message;
-	{
-		SCOPED_PROFILE("Open Alembic");
-		storage.open(abcPath, error_message);
-	}
-
-	if (storage.isOpened()) {
-		SCOPED_PROFILE("Read Alembic Frame");
-		_alembicscene = storage.read(0, error_message);
-	}
-	if (error_message.empty() == false) {
-		printf("sample error_message: %s\n", error_message.c_str());
-	}
-
-	std::filesystem::path abcDirectory(abcPath);
-	abcDirectory.remove_filename();
-
-	pt = new WavefrontPathTracing(context_ptr, _alembicscene, abcDirectory, RenderMode_ALLGPU);
+	// pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU);
+	pt = new WavefrontPathTracing(abcPath, RenderMode_SingleGPU);
 	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
 		ofPixels imagedata;
 		imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);

@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <tbb/task_group.h>
 #include <tbb/tbb.h>
+#include <tbb/flow_graph.h>
 
 #include "raccoon_ocl.hpp"
 #include "peseudo_random.hpp"
@@ -336,24 +337,21 @@ namespace rt {
 
 	class WavefrontLane {
 	public:
-		WavefrontLane(OpenCLLane lane, houdini_alembic::CameraObject *camera, const SceneManager &sceneManager, int wavefrontPathCount)
-			:_lane(lane), _camera(*camera), _wavefrontPathCount(wavefrontPathCount) {
-			SCOPED_PROFILE("WavefrontLane()");
+		WavefrontLane(OpenCLLane lane, int wavefrontPathCount) {
+			_lane = lane;
+			_wavefrontPathCount = wavefrontPathCount;
 
+			// 重くないので、ここは最初にやってしまう
 			_step_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
 			_step_data_transfer = unique(new OpenCLQueue(lane.context, lane.device_id));
 			_finalize_queue = unique(new OpenCLQueue(lane.context, lane.device_id));
+		}
 
-			BEG_PROFILE("Compile Kernel");
+		void compile_kernels_main() {
+			OpenCLLane lane = _lane;
+
+			BEG_PROFILE("Compile Kernel (main)");
 			SET_PROFILE_DESC(lane.device_name.c_str());
-
-			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
-			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
-
-			OpenCLProgram program_new_path("new_path.cl", lane.context, lane.device_id);
-			_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", program_new_path.program()));
-			_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
-			_kernel_finalize_new_path = unique(new OpenCLKernel("finalize_new_path", program_new_path.program()));
 
 			OpenCLProgram program_extension_ray_cast("extension_ray_cast_stackless.cl", lane.context, lane.device_id);
 			_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", program_extension_ray_cast.program()));
@@ -362,9 +360,9 @@ namespace rt {
 			_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
 
 			OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id);
-			_kernel_sample_envmap_stage       = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
+			_kernel_sample_envmap_stage = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
 			_kernel_evaluate_envmap_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_pdf_stage", program_envmap_sampling.program()));
-			_kernel_sample_envmap_6axis_stage       = unique(new OpenCLKernel("sample_envmap_6axis_stage", program_envmap_sampling.program()));
+			_kernel_sample_envmap_6axis_stage = unique(new OpenCLKernel("sample_envmap_6axis_stage", program_envmap_sampling.program()));
 			_kernel_evaluate_envmap_6axis_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_6axis_pdf_stage", program_envmap_sampling.program()));
 
 			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
@@ -385,7 +383,7 @@ namespace rt {
 			_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
 
 			_kernel_sample_or_eval_homogeneous_volume_inside_stage = unique(new OpenCLKernel("sample_or_eval_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
-			_kernel_homogeneous_volume_inside_stage                = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			_kernel_homogeneous_volume_inside_stage = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
 
 			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
 			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
@@ -394,7 +392,38 @@ namespace rt {
 			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
 			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
 
+			OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id);
+			_kernel_accumlation_to_intermediate = unique(new OpenCLKernel("accumlation_to_intermediate", program_accumlation.program()));
+			_kernel_merge_intermediate = unique(new OpenCLKernel("merge_intermediate", program_accumlation.program()));
+
+			_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
+
+			OpenCLProgram program_mutex("mutex.cl", lane.context, lane.device_id);
+			_kernel_acquire_mutex_in_step = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
+			_kernel_free_mutex_in_step = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
+			_kernel_acquire_mutex_in_merge = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
+			_kernel_free_mutex_in_merge = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
+			_kernel_copy_if_locked = unique(new OpenCLKernel("copy_if_locked", program_mutex.program()));
+
+			OpenCLProgram program_stat("stat.cl", lane.context, lane.device_id);
+			_kernel_stat = unique(new OpenCLKernel("stat", program_stat.program()));
+
+			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
+			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
+
+			OpenCLProgram program_new_path("new_path.cl", lane.context, lane.device_id);
+			_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", program_new_path.program()));
+			_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
+			_kernel_finalize_new_path = unique(new OpenCLKernel("finalize_new_path", program_new_path.program()));
+
 			END_PROFILE();
+		}
+
+		void setup(houdini_alembic::CameraObject *camera, const SceneManager &sceneManager) {
+			OpenCLLane lane = _lane;
+			_camera = *camera;
+			
+			SCOPED_PROFILE("WavefrontLane()");
 
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -438,33 +467,18 @@ namespace rt {
 			_accum_color_intermediate       = unique(new ReadableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 			_accum_color_intermediate_other = unique(new WritableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
-			OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id);
-
-			_kernel_accumlation_to_intermediate = unique(new OpenCLKernel("accumlation_to_intermediate", program_accumlation.program()));
-
-			_kernel_merge_intermediate = unique(new OpenCLKernel("merge_intermediate", program_accumlation.program()));
-
-			_final_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
-			_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
-
 			_intermediate_mutex = unique(new OpenCLBuffer<int32_t>(lane.context, 1, rt::OpenCLKernelBufferMode::ReadWrite));
 			_is_holding_intermediate_in_step = unique(new OpenCLBuffer<int32_t>(lane.context, 1, rt::OpenCLKernelBufferMode::ReadWrite));
 			_is_holding_intermediate_in_merge = unique(new ReadableBuffer<int32_t>(lane.context, lane.queue, 1));
 
-			OpenCLProgram program_mutex("mutex.cl", lane.context, lane.device_id);
-			_kernel_acquire_mutex_in_step = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
-			_kernel_free_mutex_in_step    = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
-			_kernel_acquire_mutex_in_merge = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
-			_kernel_free_mutex_in_merge    = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
-			_kernel_copy_if_locked = unique(new OpenCLKernel("copy_if_locked", program_mutex.program()));
+			_final_color = unique(new ReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 
 			// Stat
 			_all_sample_count = unique(new PeriodicReadableBuffer<uint32_t>(lane.context, lane.queue, 2));
-			OpenCLProgram program_stat("stat.cl", lane.context, lane.device_id);
-			_kernel_stat = unique(new OpenCLKernel("stat", program_stat.program()));
 
 			_avg_sample = 0;
 		}
+
 		~WavefrontLane() {
 			_eventQueue.wait();
 			
@@ -1099,83 +1113,149 @@ namespace rt {
 	};
 	class WavefrontPathTracing {
 	public:
-		WavefrontPathTracing(OpenCLContext *context, std::shared_ptr<houdini_alembic::AlembicScene> scene, std::filesystem::path alembicDirectory, RenderMode renderMode)
-			:_context(context)
-			,_scene(scene) {
+		WavefrontPathTracing(std::string abcPath, RenderMode renderMode) {
 			SCOPED_PROFILE("WavefrontPathTracing()");
-			_sceneManager.setAlembicDirectory(alembicDirectory);
 
-			for (auto o : scene->objects) {
-				if (o->visible == false) {
-					continue;
+			typedef tbb::flow::continue_node<tbb::flow::continue_msg> node;
+			typedef const tbb::flow::continue_msg& msg;
+			tbb::flow::graph g;
+
+			node origin_node(g, [&](msg) {
+				// nop
+				printf("start initialize graph\n");
+			});
+
+			node create_context_and_allocate_lane_node(g, [&](msg) { 
+				printf("create_context_and_allocate_lane_node\n");
+
+				_context = unique(new OpenCLContext());
+
+				printf("initialized context, %.2f s\n", ofGetElapsedTimef());
+
+				int deviceCount = _context->deviceCount();
+				for (int device_index = 0; device_index < deviceCount; ++device_index) {
+					auto info = _context->device_info(device_index);
+					printf("-- device[%d] (%s) --\n", device_index, info.name.c_str());
+
+					printf("%s\n", info.version.c_str());
+					printf("type : %s\n", info.is_gpu ? "GPU" : "CPU");
+					printf("has unified memory : %s\n", info.has_unified_memory ? "YES" : "NO");
 				}
+				RT_ASSERT(0 < _context->deviceCount());
 
-				if (_camera == nullptr) {
-					if (auto camera = o.as_camera()) {
-						_camera = camera;
+				// Allocate Lane
+				if (renderMode == RenderMode_ALLGPU) {
+					// ALL Device
+					for (int i = 0; i < _context->deviceCount(); ++i) {
+						auto lane = _context->lane(i);
+						if (lane.is_gpu == false) {
+							continue;
+						}
+						if (lane.is_discrete_memory == false) {
+							continue;
+						}
+						_wavefront_lanes.emplace_back(unique(new WavefrontLane(lane, kWavefrontPathCountGPU)));
 					}
 				}
-				if (auto polymesh = o.as_polygonMesh()) {
-					_sceneManager.addPolymesh(polymesh);
+				else {
+					for (int i = 0; i < 1; ++i) {
+						auto lane = _context->lane(i);
+						if (lane.is_gpu == false) {
+							continue;
+						}
+						if (lane.is_discrete_memory == false) {
+							continue;
+						}
+						_wavefront_lanes.emplace_back(unique(new WavefrontLane(lane, kWavefrontPathCountGPU)));
+					}
 				}
-			}
+			});
+			make_edge(origin_node, create_context_and_allocate_lane_node);
 
-			// It is order dependent, tooo bad
-			for (auto o : scene->objects) {
-				if (o->visible == false) {
-					continue;
+			node compile_kernels_main_node(g, [&](msg) {
+				printf("compile_kernels_main_node\n");
+
+				for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+					_wavefront_lanes[i]->compile_kernels_main();
 				}
-				if (auto point = o.as_point()) {
-					_sceneManager.addPoint(point);
+			});
+			make_edge(create_context_and_allocate_lane_node, compile_kernels_main_node);
+
+			node load_scene_node(g, [&](msg) {
+				printf("load_scene_node\n");
+
+				houdini_alembic::AlembicStorage storage;
+				std::string error_message;
+				{
+					SCOPED_PROFILE("Open Alembic");
+					storage.open(abcPath, error_message);
 				}
-			}
 
-			RT_ASSERT(_camera);
+				if (storage.isOpened()) {
+					SCOPED_PROFILE("Read Alembic Frame");
+					_scene = storage.read(0, error_message);
+				}
+				if (error_message.empty() == false) {
+					printf("sample error_message: %s\n", error_message.c_str());
+				}
+				auto scene = _scene;
 
-			BEG_PROFILE("Build BVH");
-			_sceneManager.buildBVH();
-			END_PROFILE();
+				std::filesystem::path abcDirectory(abcPath);
+				abcDirectory.remove_filename();
 
-			// ALL Device
-			if (renderMode == RenderMode_ALLGPU) {
+				_sceneManager.setAlembicDirectory(abcDirectory);
+
+				for (auto o : scene->objects) {
+					if (o->visible == false) {
+						continue;
+					}
+
+					if (_camera == nullptr) {
+						if (auto camera = o.as_camera()) {
+							_camera = camera;
+						}
+					}
+					if (auto polymesh = o.as_polygonMesh()) {
+						_sceneManager.addPolymesh(polymesh);
+					}
+				}
+
+				// It is order dependent, tooo bad
+				for (auto o : scene->objects) {
+					if (o->visible == false) {
+						continue;
+					}
+					if (auto point = o.as_point()) {
+						_sceneManager.addPoint(point);
+					}
+				}
+
+				RT_ASSERT(_camera);
+
+				BEG_PROFILE("Build BVH");
+				_sceneManager.buildBVH();
+				END_PROFILE();
+			});
+			make_edge(origin_node, load_scene_node);
+
+			node setup_node(g, [&](msg) {
+				printf("setup_node\n");
+
 				tbb::task_group g;
-				std::mutex m;
-
-				for (int i = 0; i < context->deviceCount(); ++i) {
-					auto lane = context->lane(i);
-					if (lane.is_gpu == false) {
-						continue;
-					}
-					if (lane.is_discrete_memory == false) {
-						continue;
-					}
-					g.run([&]() {
-						int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-						auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-						wavefront_lane->initialize(i);
-
-						std::lock_guard<std::mutex> lc(m);
-						_wavefront_lanes.emplace_back(std::move(wavefront_lane));
+				for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+					int index = i;
+					g.run([index, this] {
+						_wavefront_lanes[index]->setup(_camera, _sceneManager);
+						_wavefront_lanes[index]->initialize(index);
 					});
 				}
-
 				g.wait();
-			}
-			else {
-				for (int i = 0; i < 1; ++i) {
-					auto lane = context->lane(i);
-					if (lane.is_gpu == false) {
-						continue;
-					}
-					if (lane.is_discrete_memory == false) {
-						continue;
-					}
-					int wavefront = lane.is_discrete_memory ? kWavefrontPathCountGPU : kWavefrontPathCountCPU;
-					auto wavefront_lane = unique(new WavefrontLane(lane, _camera, _sceneManager, wavefront));
-					wavefront_lane->initialize(i);
-					_wavefront_lanes.emplace_back(std::move(wavefront_lane));
-				}
-			}
+			});
+			make_edge(load_scene_node, setup_node);
+			make_edge(compile_kernels_main_node, setup_node);
+
+			origin_node.try_put(tbb::flow::continue_msg());
+			g.wait_for_all();
 		}
 		~WavefrontPathTracing() {
 			_continue = false;
@@ -1307,9 +1387,13 @@ namespace rt {
 			}
 		}
 
+		OpenCLContext *context() const {
+			return _context.get();
+		}
+
 		std::function<void(RGBA8ValueType *, int, int)> onColorRecieved;
 
-		OpenCLContext *_context;
+		std::unique_ptr<OpenCLContext> _context;
 
 		std::shared_ptr<houdini_alembic::AlembicScene> _scene;
 		houdini_alembic::CameraObject *_camera = nullptr;

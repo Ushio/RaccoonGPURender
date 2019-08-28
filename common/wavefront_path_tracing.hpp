@@ -353,68 +353,102 @@ namespace rt {
 			BEG_PROFILE("Compile Kernel (main)");
 			SET_PROFILE_DESC(lane.device_name.c_str());
 
-			OpenCLProgram program_extension_ray_cast("extension_ray_cast_stackless.cl", lane.context, lane.device_id);
-			_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", program_extension_ray_cast.program()));
+			tbb::task_group g;
 
-			OpenCLProgram program_logic("logic.cl", lane.context, lane.device_id);
-			_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
+			g.run([&]() {
+				OpenCLProgram program_extension_ray_cast("extension_ray_cast_stackless.cl", lane.context, lane.device_id);
+				_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", program_extension_ray_cast.program()));
+			});
 
-			OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id);
-			_kernel_sample_envmap_stage = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
-			_kernel_evaluate_envmap_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_pdf_stage", program_envmap_sampling.program()));
-			_kernel_sample_envmap_6axis_stage = unique(new OpenCLKernel("sample_envmap_6axis_stage", program_envmap_sampling.program()));
-			_kernel_evaluate_envmap_6axis_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_6axis_pdf_stage", program_envmap_sampling.program()));
+			g.run([&]() {
+				OpenCLProgram program_logic("logic.cl", lane.context, lane.device_id);
+				_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
+			});
 
-			OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
-			_kernel_lambertian_stage = unique(new OpenCLKernel("lambertian_stage", program_lambertian.program()));
-			_kernel_sample_or_eval_lambertian_stage = unique(new OpenCLKernel("sample_or_eval_lambertian_stage", program_lambertian.program()));
+			g.run([&]() {
+				OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id);
+				_kernel_sample_envmap_stage = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
+				_kernel_evaluate_envmap_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_pdf_stage", program_envmap_sampling.program()));
+				_kernel_sample_envmap_6axis_stage = unique(new OpenCLKernel("sample_envmap_6axis_stage", program_envmap_sampling.program()));
+				_kernel_evaluate_envmap_6axis_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_6axis_pdf_stage", program_envmap_sampling.program()));
+			});
 
-			OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id);
-			_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
+			g.run([&]() {
+				OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id);
+				_kernel_lambertian_stage = unique(new OpenCLKernel("lambertian_stage", program_lambertian.program()));
+				_kernel_sample_or_eval_lambertian_stage = unique(new OpenCLKernel("sample_or_eval_lambertian_stage", program_lambertian.program()));
+			});
 
-			OpenCLProgram program_ward("ward.cl", lane.context, lane.device_id);
-			_kernel_sample_or_eval_ward_stage = unique(new OpenCLKernel("sample_or_eval_ward_stage", program_ward.program()));
-			_kernel_ward_stage = unique(new OpenCLKernel("ward_stage", program_ward.program()));
+			g.run([&]() {
+				OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id);
+				_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
+			});
 
-			OpenCLProgram program_homogeneous_volume_through("homogeneous_volume_through.cl", lane.context, lane.device_id);
-			_kernel_homogeneous_volume_through = unique(new OpenCLKernel("homogeneous_volume_through", program_homogeneous_volume_through.program()));
+			g.run([&]() {
+				OpenCLProgram program_ward("ward.cl", lane.context, lane.device_id);
+				_kernel_sample_or_eval_ward_stage = unique(new OpenCLKernel("sample_or_eval_ward_stage", program_ward.program()));
+				_kernel_ward_stage = unique(new OpenCLKernel("ward_stage", program_ward.program()));
+			});
 
-			OpenCLProgram program_homogeneous_volume("homogeneous_volume.cl", lane.context, lane.device_id);
-			_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
+			g.run([&]() {
+				OpenCLProgram program_homogeneous_volume_through("homogeneous_volume_through.cl", lane.context, lane.device_id);
+				_kernel_homogeneous_volume_through = unique(new OpenCLKernel("homogeneous_volume_through", program_homogeneous_volume_through.program()));
+			});
 
-			_kernel_sample_or_eval_homogeneous_volume_inside_stage = unique(new OpenCLKernel("sample_or_eval_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
-			_kernel_homogeneous_volume_inside_stage = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			g.run([&]() {
+				OpenCLProgram program_homogeneous_volume("homogeneous_volume.cl", lane.context, lane.device_id);
+				_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
+				_kernel_sample_or_eval_homogeneous_volume_inside_stage = unique(new OpenCLKernel("sample_or_eval_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+				_kernel_homogeneous_volume_inside_stage = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
+			});
 
-			OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
-			_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
+			g.run([&]() {
+				OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id);
+				_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
+			});
 
-			OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
-			_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
-			_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
+			g.run([&]() {
+				OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id);
+				_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
+				_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
+			});
 
-			OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id);
-			_kernel_accumlation_to_intermediate = unique(new OpenCLKernel("accumlation_to_intermediate", program_accumlation.program()));
-			_kernel_merge_intermediate = unique(new OpenCLKernel("merge_intermediate", program_accumlation.program()));
+			g.run([&]() {
+				OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id);
+				_kernel_accumlation_to_intermediate = unique(new OpenCLKernel("accumlation_to_intermediate", program_accumlation.program()));
+				_kernel_merge_intermediate = unique(new OpenCLKernel("merge_intermediate", program_accumlation.program()));
 
-			_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
+				_kernel_tonemap = unique(new OpenCLKernel("tonemap", program_accumlation.program()));
+			});
 
-			OpenCLProgram program_mutex("mutex.cl", lane.context, lane.device_id);
-			_kernel_acquire_mutex_in_step = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
-			_kernel_free_mutex_in_step = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
-			_kernel_acquire_mutex_in_merge = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
-			_kernel_free_mutex_in_merge = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
-			_kernel_copy_if_locked = unique(new OpenCLKernel("copy_if_locked", program_mutex.program()));
 
-			OpenCLProgram program_stat("stat.cl", lane.context, lane.device_id);
-			_kernel_stat = unique(new OpenCLKernel("stat", program_stat.program()));
+			g.run([&]() {
+				OpenCLProgram program_mutex("mutex.cl", lane.context, lane.device_id);
+				_kernel_acquire_mutex_in_step = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
+				_kernel_free_mutex_in_step = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
+				_kernel_acquire_mutex_in_merge = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
+				_kernel_free_mutex_in_merge = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
+				_kernel_copy_if_locked = unique(new OpenCLKernel("copy_if_locked", program_mutex.program()));
+			});
 
-			OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
-			_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
+			g.run([&]() {
+				OpenCLProgram program_stat("stat.cl", lane.context, lane.device_id);
+				_kernel_stat = unique(new OpenCLKernel("stat", program_stat.program()));
+			});
 
-			OpenCLProgram program_new_path("new_path.cl", lane.context, lane.device_id);
-			_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", program_new_path.program()));
-			_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
-			_kernel_finalize_new_path = unique(new OpenCLKernel("finalize_new_path", program_new_path.program()));
+			g.run([&]() {
+				OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id);
+				_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
+			});
+
+			g.run([&]() {
+				OpenCLProgram program_new_path("new_path.cl", lane.context, lane.device_id);
+				_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", program_new_path.program()));
+				_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
+				_kernel_finalize_new_path = unique(new OpenCLKernel("finalize_new_path", program_new_path.program()));
+			});
+
+			g.wait();
 
 			END_PROFILE();
 		}

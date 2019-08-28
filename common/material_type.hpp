@@ -34,8 +34,6 @@ namespace rt {
 		OpenCLFloat3 R  = glm::vec3(1.0f);
 		int BackEmission = 0;
 
-		//std::array<glm::vec3, 3> Nv;
-		//int ShadingNormal = 0;
 	};
 
 	class Specular {
@@ -98,13 +96,11 @@ namespace rt {
 	{
 		using namespace rttr;
 
-		registration::class_<Lambertian>("Lambertian")
+	registration::class_<Lambertian>("Lambertian")
 		.constructor<>()
 		.property("Le", &Lambertian::Le)(metadata(kGeoScopeKey, GeoScope::Primitives))
 		.property("Cd", &Lambertian::R)(metadata(kGeoScopeKey, GeoScope::Primitives))
 		.property("BackEmission", &Lambertian::BackEmission)(metadata(kGeoScopeKey, GeoScope::Primitives));
-		//.property("N", &LambertianBRDF::Nv)(metadata(kGeoScopeKey, GeoScope::Vertices))
-		//.property("ShadingNormal", &LambertianBRDF::ShadingNormal)(metadata(kGeoScopeKey, GeoScope::Primitives));
 
 		registration::class_<Specular>("Specular")
 		.constructor<>();
@@ -130,4 +126,50 @@ namespace rt {
 		registration::method("construct_Ward", &construct_Ward);
 		registration::method("construct_HomogeneousVolume", &construct_HomogeneousVolume);
 	}
+
+	class PrimitivePropertyQuery {
+	public:
+		static PrimitivePropertyQuery &instance() {
+			static PrimitivePropertyQuery i;
+			return i;
+		}
+
+		PrimitivePropertyQuery() {
+			std::vector<std::string> registrations = {
+				"Lambertian",
+				"Ward",
+				"HomogeneousVolume",
+			};
+
+			for (auto cls : registrations) {
+				rttr::type t = rttr::type::get_by_name(cls);
+
+				std::vector<std::string> keys;
+				for (auto& prop : t.get_properties()) {
+					auto meta = prop.get_metadata(kGeoScopeKey);
+					RT_ASSERT(meta.is_valid());
+					GeoScope scope = meta.get_value<GeoScope>();
+					if (scope == GeoScope::Primitives) {
+						keys.push_back(prop.get_name().to_string());
+					}
+				}
+
+				_keyMap[cls] = keys;
+			}
+
+		}
+
+		void primitive_keys(const std::string &cls, std::vector<const const char *> &keys) {
+			keys.clear();
+
+			auto it = _keyMap.find(cls);
+			if (it != _keyMap.end()) {
+				for (auto &key : it->second) {
+					keys.push_back(key.c_str());
+				}
+			}
+		}
+
+		std::map<std::string, std::vector<std::string> > _keyMap;
+	};
 }

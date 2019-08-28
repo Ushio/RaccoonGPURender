@@ -37,6 +37,8 @@ namespace rt {
 		template <class T>
 		class StorageT : public Storage {
 		public:
+			StorageT() {
+			}
 			int size() const {
 				return (int)_elements.size();
 			}
@@ -94,24 +96,6 @@ namespace rt {
 		}
 
 		void add_variant(const rttr::variant &instance) {
-			//if (instance.is_type<std::shared_ptr<Lambertian>>()) {
-			//	add(*instance.get_value<std::shared_ptr<Lambertian>>(), kMaterialType_Lambertian);
-			//}
-			//else if (instance.is_type<std::shared_ptr<Specular>>()) {
-			//	add(*instance.get_value<std::shared_ptr<Specular>>(), kMaterialType_Specular);
-			//}
-			//else if (instance.is_type<std::shared_ptr<Dierectric>>()) {
-			//	add(*instance.get_value<std::shared_ptr<Dierectric>>(), kMaterialType_Dierectric);
-			//}
-			//else if (instance.is_type<std::shared_ptr<Ward>>()) {
-			//	add(*instance.get_value<std::shared_ptr<Ward>>(), kMaterialType_Ward);
-			//}
-			//else if (instance.is_type<std::shared_ptr<HomogeneousVolume>>()) {
-			//	add(*instance.get_value<std::shared_ptr<HomogeneousVolume>>(), kMaterialType_HomogeneousVolume);
-			//}
-			//else {
-			//	RT_ASSERT(0);
-			//}
 			if (instance.is_type<Lambertian*>()) {
 				add(*instance.get_value<Lambertian*>(), kMaterialType_Lambertian);
 			}
@@ -159,8 +143,13 @@ namespace rt {
 			SCOPED_PROFILE("parallel_for variant()");
 			SET_PROFILE_DESC(p->name.c_str());
 
+			auto float3_type = type::get<OpenCLFloat3>();
+			auto int_type = type::get<int>();
+			auto float_type = type::get<float>();
+
 			tbb::parallel_for(tbb::blocked_range<int>(0, p->primitives.rowCount()), [&](const tbb::blocked_range<int> &range) {
 				std::string construct;
+				std::vector<const const char *> keys;
 				for (int i = range.begin(); i < range.end(); ++i) {
 					const std::string m = material_string->get(i);
 
@@ -174,34 +163,28 @@ namespace rt {
 
 					RT_ASSERT(t.is_valid());
 
-					for (auto& prop : t.get_properties()) {
-						auto meta = prop.get_metadata(kGeoScopeKey);
-						RT_ASSERT(meta.is_valid());
+					PrimitivePropertyQuery::instance().primitive_keys(m, keys);
 
-						GeoScope scope = meta.get_value<GeoScope>();
-						auto value = prop.get_value(instance);
-
-						switch (scope)
-						{
-						case rt::GeoScope::Primitives:
-							if (value.is_type<OpenCLFloat3>()) {
-								if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
-									glm::vec3 value;
-									v->get(i, glm::value_ptr(value));
-									prop.set_value(instance, OpenCLFloat3(value));
-								}
+					for (auto key : keys) {
+						auto prop = t.get_property(key);
+						auto type = prop.get_type();
+						
+						if (type == float3_type) {
+							if (auto v = p->primitives.column_as_vector3(prop.get_name().data())) {
+								glm::vec3 value;
+								v->get(i, glm::value_ptr(value));
+								prop.set_value(instance, OpenCLFloat3(value));
 							}
-							else if (value.is_type<int>()) {
-								if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
-									prop.set_value(instance, v->get(i));
-								}
+						}
+						else if (type == int_type) {
+							if (auto v = p->primitives.column_as_int(prop.get_name().data())) {
+								prop.set_value(instance, v->get(i));
 							}
-							else if (value.is_type<float>()) {
-								if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
-									prop.set_value(instance, v->get(i));
-								}
+						}
+						else if (type == float_type) {
+							if (auto v = p->primitives.column_as_float(prop.get_name().data())) {
+								prop.set_value(instance, v->get(i));
 							}
-							break;
 						}
 					}
 				}

@@ -829,9 +829,32 @@ namespace rt {
 		ocl_shared_ptr<cl_kernel> _kernel;
 	};
 
+	class OpenCLProgramCache {
+	public:
+		static OpenCLProgramCache &instance() {
+			static OpenCLProgramCache i;
+			return i;
+		}
+
+		// return zero size if cache not found.
+		std::vector<unsigned char> load(const std::string &kernel_file, const std::string &device_name) {
+			std::lock_guard<std::mutex> lc(_mutex);
+			auto key = std::make_pair(kernel_file, device_name);
+			auto it = _cache.find(key);
+			return it != _cache.end() ? it->second : std::vector<unsigned char>();
+		}
+		void store(const std::string &kernel_src, const std::string &device_name, const std::vector<unsigned char> &data) {
+			std::lock_guard<std::mutex> lc(_mutex);
+			auto key = std::make_pair(kernel_src, device_name);
+			_cache[key] = data;
+		}
+	private:
+		mutable std::mutex _mutex;
+		std::map<std::pair<std::string, std::string>, std::vector<unsigned char>> _cache;
+	};
 	class OpenCLProgram {
 	public:
-		OpenCLProgram(const char *kernel_file, cl_context context, cl_device_id device_id)
+		OpenCLProgram(const char *kernel_file, cl_context context, cl_device_id device_id, const std::string &device_name)
 			: _context(context)
 			, _device_id(device_id)
 		{
@@ -843,15 +866,33 @@ namespace rt {
 
 			std::ifstream ifs(env.kernelAbsolutePath(kernel_file));
 			std::string src = std::string(std::istreambuf_iterator<char>(ifs), std::istreambuf_iterator<char>());
-			construct(src.c_str(), options);
+			construct(kernel_file, src.c_str(), options, device_id, device_name);
 		}
 
 		cl_program program() {
 			return _program.get();
 		}
 	private:
-		void construct(const char *kernel_source, OpenCLBuildOptions options) {
+		void construct(const char *kernel_name, const char *kernel_source, OpenCLBuildOptions options, cl_device_id device_id, const std::string &device_name) {
 			const char *program_sources[] = { kernel_source };
+
+			std::vector<unsigned char> cached_program = OpenCLProgramCache::instance().load(kernel_source, device_name);
+			if (!cached_program.empty()) {
+				size_t length = cached_program.size();
+				const unsigned char *data = cached_program.data();
+				cl_int status;
+				cl_int b_status;
+				cl_program program = clCreateProgramWithBinary(_context, 1, &device_id, &length, &data, &b_status, &status);
+				_program = decltype(_program)(program, clReleaseProgram);
+
+				if (status == CL_SUCCESS && b_status == CL_SUCCESS) {
+					status = clBuildProgram(program, 1, &device_id, nullptr, NULL, NULL);
+					if (status == CL_SUCCESS) {
+						printf("kernel \"%s\" load from cache.\n", kernel_name);
+						return;
+					}
+				}
+			}
 
 			cl_int status;
 			cl_program program = clCreateProgramWithSource(_context, sizeof(program_sources) / sizeof(program_sources[0]), program_sources, nullptr, &status);
@@ -860,7 +901,7 @@ namespace rt {
 
 			_program = decltype(_program)(program, clReleaseProgram);
 
-			status = clBuildProgram(program, 0, nullptr, options.option().c_str(), NULL, NULL);
+			status = clBuildProgram(program, 1, &device_id, options.option().c_str(), NULL, NULL);
 			if (status == CL_BUILD_PROGRAM_FAILURE) {
 				std::string build_log;
 				status = opencl_build_log(build_log, program, _device_id);
@@ -870,6 +911,18 @@ namespace rt {
 			else if (status != CL_SUCCESS) {
 				RAC_ASSERT(status == CL_SUCCESS, "clBuildProgram() failed");
 			}
+
+			size_t binary_size = 0;
+			status = clGetProgramInfo(program, CL_PROGRAM_BINARY_SIZES, sizeof(size_t), &binary_size, NULL);
+			RAC_ASSERT(status == CL_SUCCESS, "clGetProgramInfo(CL_PROGRAM_BINARY_SIZES) failed");
+
+			std::vector<unsigned char> binary_data(binary_size);
+			unsigned char *binary_data_ptr = binary_data.data();
+			status = clGetProgramInfo(program, CL_PROGRAM_BINARIES, sizeof(binary_data_ptr), &binary_data_ptr, NULL);
+			RAC_ASSERT(status == CL_SUCCESS, "clGetProgramInfo(CL_PROGRAM_BINARIES) failed");
+
+			// store cache
+			OpenCLProgramCache::instance().store(kernel_source, device_name, binary_data);
 		}
 	private:
 		cl_context _context;

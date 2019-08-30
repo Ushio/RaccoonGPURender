@@ -14,8 +14,10 @@
 #include <CL/cl.h>
 #include <CL/cl_platform.h>
 
+#include "timeline_profiler.hpp"
+
 #define USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION 1
-#define USE_PPL_AT_CREATE_CONTEXT 1
+#define USE_PPL_AT_CREATE_CONTEXT 0
 
 #if USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION
 #include <intrin.h>
@@ -538,18 +540,27 @@ namespace rt {
 			bool has_unified_memory;
 		};
 		OpenCLContext(bool skipCPU = true) {
-			cl_int status;
-			cl_uint numOfPlatforms;
-			status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
-			RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
-			RAC_ASSERT(numOfPlatforms != 0, "no available opencl platform");
+			SCOPED_PROFILE("OpenCLContext()");
 
+			cl_int status;
+			//cl_uint numOfPlatforms;
+			//status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
+			//printf("clGetPlatformIDs()\n");
+
+			//RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
+			//RAC_ASSERT(numOfPlatforms != 0, "no available opencl platform");
+
+			cl_uint numOfPlatforms = 32;
 			std::vector<cl_platform_id> platforms(numOfPlatforms);
 			status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
 			RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
 
+			platforms.resize(numOfPlatforms);
+
 			for (cl_platform_id platform : platforms)
 			{
+				SCOPED_PROFILE("for (cl_platform_id platform : platforms)");
+
 				PlatformInfo platform_info;
 				status = opencl_platform_info(platform_info.profile, platform, CL_PLATFORM_PROFILE);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
 				status = opencl_platform_info(platform_info.version, platform, CL_PLATFORM_VERSION);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
@@ -568,6 +579,7 @@ namespace rt {
 				// printf("CL_PLATFORM_NAME: %s\n", platform_info.name.c_str());
 				
 				for (cl_device_id device_id : deviceIds) {
+					SCOPED_PROFILE("for (cl_device_id device_id : deviceIds)");
 					// printf("device_id: %p\n", device_id);
 
 					DeviceInfo device_info;
@@ -631,6 +643,7 @@ namespace rt {
 					{
 						DeviceContext deviceContext;
 						deviceContext.platform_info = platform_info;
+						deviceContext.platform_id = platform;
 						deviceContext.device_info = device_info;
 						deviceContext.device_id = device_id;
 						_deviceContexts.push_back(deviceContext);
@@ -638,22 +651,27 @@ namespace rt {
 				}
 			}
 
-			RAC_FOR_EACH(_deviceContexts.begin(), _deviceContexts.end(), [](DeviceContext &deviceContext) {
-				cl_int status;
+			//RAC_FOR_EACH(_deviceContexts.begin(), _deviceContexts.end(), [](DeviceContext &deviceContext) {
+			//	SCOPED_PROFILE("clCreateContext for each");
 
-				cl_context context = clCreateContext(NULL, 1, &deviceContext.device_id, NULL, NULL, &status);
-				if (status != CL_SUCCESS) {
-					return;
-				}
-				deviceContext.context = ocl_shared_ptr<cl_context>(context, clReleaseContext);
+			//	cl_int status;
 
-				// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
-				cl_command_queue queue = clCreateCommandQueue(context, deviceContext.device_id, CL_QUEUE_PROFILING_ENABLE, &status);
-				if (status != CL_SUCCESS) {
-					return;
-				}
-				deviceContext.queue = ocl_shared_ptr<cl_command_queue>(queue, clReleaseCommandQueue);
-			});
+			//	cl_context_properties properties[] = {
+			//		CL_CONTEXT_PLATFORM, (cl_context_properties)(deviceContext.platform_id), 0 
+			//	};
+			//	cl_context context = clCreateContext(properties, 1, &deviceContext.device_id, NULL, NULL, &status);
+			//	if (status != CL_SUCCESS) {
+			//		return;
+			//	}
+			//	deviceContext.context = ocl_shared_ptr<cl_context>(context, clReleaseContext);
+
+			//	// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
+			//	cl_command_queue queue = clCreateCommandQueue(context, deviceContext.device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+			//	if (status != CL_SUCCESS) {
+			//		return;
+			//	}
+			//	deviceContext.queue = ocl_shared_ptr<cl_command_queue>(queue, clReleaseCommandQueue);
+			//});
 
 			std::map<std::string, int> priority = {
 				{kPLATFORM_NAME_AMD,    3},
@@ -684,6 +702,26 @@ namespace rt {
 			lane.is_discrete_memory = _deviceContexts[index].device_info.has_unified_memory == false;
 			return lane;
 		}
+		void lane_initialize(int index) {
+			DeviceContext &deviceContext = _deviceContexts[index];
+
+			cl_int status;
+			cl_context_properties properties[] = {
+				CL_CONTEXT_PLATFORM, (cl_context_properties)(deviceContext.platform_id), 0
+			};
+			cl_context context = clCreateContext(properties, 1, &deviceContext.device_id, NULL, NULL, &status);
+			if (status != CL_SUCCESS) {
+				return;
+			}
+			deviceContext.context = ocl_shared_ptr<cl_context>(context, clReleaseContext);
+
+			// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateCommandQueue.html
+			cl_command_queue queue = clCreateCommandQueue(context, deviceContext.device_id, CL_QUEUE_PROFILING_ENABLE, &status);
+			if (status != CL_SUCCESS) {
+				return;
+			}
+			deviceContext.queue = ocl_shared_ptr<cl_command_queue>(queue, clReleaseCommandQueue);
+		}
 		PlatformInfo platform_info(int index) const {
 			RAC_ASSERT(0 <= index && index < _deviceContexts.size(), "platform_info() out of range");
 			return _deviceContexts[index].platform_info;
@@ -696,6 +734,7 @@ namespace rt {
 		struct DeviceContext {
 			PlatformInfo platform_info;
 			DeviceInfo device_info;
+			cl_platform_id platform_id = nullptr;
 			cl_device_id device_id = nullptr;
 			ocl_shared_ptr<cl_context> context;
 			ocl_shared_ptr<cl_command_queue> queue;
@@ -888,7 +927,7 @@ namespace rt {
 				if (status == CL_SUCCESS && b_status == CL_SUCCESS) {
 					status = clBuildProgram(program, 1, &device_id, nullptr, NULL, NULL);
 					if (status == CL_SUCCESS) {
-						printf("kernel \"%s\" load from cache.\n", kernel_name);
+						// printf("kernel \"%s\" load from cache.\n", kernel_name);
 						return;
 					}
 				}

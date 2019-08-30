@@ -349,23 +349,19 @@ namespace rt {
 
 		void compile_kernels_main() {
 			OpenCLLane lane = _lane;
-
-			BEG_PROFILE("Compile Kernel (main)");
-			SET_PROFILE_DESC(lane.device_name.c_str());
-
 			tbb::task_group g;
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_extension_ray_cast("extension_ray_cast_stackless.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_extension_ray_cast = unique(new OpenCLKernel("extension_ray_cast", program_extension_ray_cast.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_logic("logic.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_logic = unique(new OpenCLKernel("logic", program_logic.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_envmap_sampling("envmap_sampling.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_sample_envmap_stage = unique(new OpenCLKernel("sample_envmap_stage", program_envmap_sampling.program()));
 				_kernel_evaluate_envmap_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_pdf_stage", program_envmap_sampling.program()));
@@ -373,47 +369,47 @@ namespace rt {
 				_kernel_evaluate_envmap_6axis_pdf_stage = unique(new OpenCLKernel("evaluate_envmap_6axis_pdf_stage", program_envmap_sampling.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_lambertian("lambertian.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_lambertian_stage = unique(new OpenCLKernel("lambertian_stage", program_lambertian.program()));
 				_kernel_sample_or_eval_lambertian_stage = unique(new OpenCLKernel("sample_or_eval_lambertian_stage", program_lambertian.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_delta_materials("delta_materials.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_delta_materials = unique(new OpenCLKernel("delta_materials", program_delta_materials.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_ward("ward.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_sample_or_eval_ward_stage = unique(new OpenCLKernel("sample_or_eval_ward_stage", program_ward.program()));
 				_kernel_ward_stage = unique(new OpenCLKernel("ward_stage", program_ward.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_homogeneous_volume_through("homogeneous_volume_through.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_homogeneous_volume_through = unique(new OpenCLKernel("homogeneous_volume_through", program_homogeneous_volume_through.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_homogeneous_volume("homogeneous_volume.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_homogeneous_volume_stage = unique(new OpenCLKernel("homogeneous_volume_stage", program_homogeneous_volume.program()));
 				_kernel_sample_or_eval_homogeneous_volume_inside_stage = unique(new OpenCLKernel("sample_or_eval_homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
 				_kernel_homogeneous_volume_inside_stage = unique(new OpenCLKernel("homogeneous_volume_inside_stage", program_homogeneous_volume.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_mixture_density("mixture_density.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
 				_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_accumlation_to_intermediate = unique(new OpenCLKernel("accumlation_to_intermediate", program_accumlation.program()));
 				_kernel_merge_intermediate = unique(new OpenCLKernel("merge_intermediate", program_accumlation.program()));
@@ -422,7 +418,7 @@ namespace rt {
 			});
 
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_mutex("mutex.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_acquire_mutex_in_step = unique(new OpenCLKernel("weak_acquire_mutex", program_mutex.program()));
 				_kernel_free_mutex_in_step = unique(new OpenCLKernel("free_intermediate", program_mutex.program()));
@@ -431,17 +427,17 @@ namespace rt {
 				_kernel_copy_if_locked = unique(new OpenCLKernel("copy_if_locked", program_mutex.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_stat("stat.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_stat = unique(new OpenCLKernel("stat", program_stat.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_peseudo_random("peseudo_random.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_random_initialize = unique(new OpenCLKernel("random_initialize", program_peseudo_random.program()));
 			});
 
-			g.run([&]() {
+			g.run([this, lane]() {
 				OpenCLProgram program_new_path("new_path.cl", lane.context, lane.device_id, lane.device_name);
 				_kernel_initialize_all_as_new_path = unique(new OpenCLKernel("initialize_all_as_new_path", program_new_path.program()));
 				_kernel_new_path = unique(new OpenCLKernel("new_path", program_new_path.program()));
@@ -449,15 +445,13 @@ namespace rt {
 			});
 
 			g.wait();
-
-			END_PROFILE();
 		}
 
 		void setup(houdini_alembic::CameraObject *camera, const SceneManager &sceneManager) {
 			OpenCLLane lane = _lane;
 			_camera = *camera;
 			
-			SCOPED_PROFILE("WavefrontLane()");
+			SCOPED_PROFILE("setup()");
 
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -1147,75 +1141,13 @@ namespace rt {
 	};
 	class WavefrontPathTracing {
 	public:
-		WavefrontPathTracing(std::string abcPath, RenderMode renderMode) {
+		WavefrontPathTracing(std::string abcPath, RenderMode renderMode, int margin_period_ms, std::function<void(RGBA8ValueType *, int, int)> colorRecieved) {
+			onColorRecieved = colorRecieved;
+
 			SCOPED_PROFILE("WavefrontPathTracing()");
 
-			typedef tbb::flow::continue_node<tbb::flow::continue_msg> node;
-			typedef const tbb::flow::continue_msg& msg;
-			tbb::flow::graph g;
-
-			node origin_node(g, [&](msg) {
-				// nop
-				printf("start initialize graph\n");
-			});
-
-			node create_context_and_allocate_lane_node(g, [&](msg) { 
-				printf("create_context_and_allocate_lane_node\n");
-
-				_context = unique(new OpenCLContext());
-
-				printf("initialized context, %.2f s\n", ofGetElapsedTimef());
-
-				int deviceCount = _context->deviceCount();
-				for (int device_index = 0; device_index < deviceCount; ++device_index) {
-					auto info = _context->device_info(device_index);
-					printf("-- device[%d] (%s) --\n", device_index, info.name.c_str());
-
-					printf("%s\n", info.version.c_str());
-					printf("type : %s\n", info.is_gpu ? "GPU" : "CPU");
-					printf("has unified memory : %s\n", info.has_unified_memory ? "YES" : "NO");
-				}
-				RT_ASSERT(0 < _context->deviceCount());
-
-				// Allocate Lane
-				if (renderMode == RenderMode_ALLGPU) {
-					// ALL Device
-					for (int i = 0; i < _context->deviceCount(); ++i) {
-						auto lane = _context->lane(i);
-						if (lane.is_gpu == false) {
-							continue;
-						}
-						if (lane.is_discrete_memory == false) {
-							continue;
-						}
-						_wavefront_lanes.emplace_back(unique(new WavefrontLane(lane, kWavefrontPathCountGPU)));
-					}
-				}
-				else {
-					for (int i = 0; i < 1; ++i) {
-						auto lane = _context->lane(i);
-						if (lane.is_gpu == false) {
-							continue;
-						}
-						if (lane.is_discrete_memory == false) {
-							continue;
-						}
-						_wavefront_lanes.emplace_back(unique(new WavefrontLane(lane, kWavefrontPathCountGPU)));
-					}
-				}
-			});
-			make_edge(origin_node, create_context_and_allocate_lane_node);
-
-			node compile_kernels_main_node(g, [&](msg) {
-				printf("compile_kernels_main_node\n");
-
-				for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-					_wavefront_lanes[i]->compile_kernels_main();
-				}
-			});
-			make_edge(create_context_and_allocate_lane_node, compile_kernels_main_node);
-
-			node load_scene_node(g, [&](msg) {
+			tbb::task_group load_scene_async;
+			load_scene_async.run([&]() {
 				printf("load_scene_node\n");
 
 				houdini_alembic::AlembicStorage storage;
@@ -1270,23 +1202,114 @@ namespace rt {
 				_sceneManager.buildBVH();
 				END_PROFILE();
 			});
+
+			typedef tbb::flow::continue_node<tbb::flow::continue_msg> node;
+			typedef const tbb::flow::continue_msg& msg;
+			tbb::flow::graph g;
+
+			node origin_node(g, [&](msg) {
+				printf("-origin_node-\n");
+			});
+
+			{
+				SCOPED_PROFILE("new OpenCLContext()");
+				_context = unique(new OpenCLContext());
+			}
+
+			std::vector<int> device_indices;
+
+			int deviceCount = _context->deviceCount();
+			for (int device_index = 0; device_index < deviceCount; ++device_index) {
+				device_indices.push_back(device_index);
+
+				if (renderMode == RenderMode_SingleGPU) {
+					break;
+				}
+			}
+
+			std::vector<node> device_setups;
+			_wavefront_lanes.resize(device_indices.size());
+
+			std::shared_ptr<std::mutex> create_context_mutex(new std::mutex());
+			for(int i = 0 ; i < device_indices.size() ; ++i) {
+				int index = i;
+				int device_index = device_indices[i];
+
+				device_setups.emplace_back(g, [this, index, device_index, create_context_mutex](msg) {
+					SCOPED_PROFILE("device setup()");
+					{
+						std::lock_guard<std::mutex> lc(*create_context_mutex);
+						SCOPED_PROFILE("lane_initialize()");
+						_context->lane_initialize(device_index);
+					}
+
+					// info print
+					auto info = _context->device_info(device_index);
+					printf("device[%d] (%s) / %s\n", device_index, info.name.c_str(), info.version.c_str());
+
+					// 
+					auto lane = _context->lane(device_index);
+					_wavefront_lanes[index] = unique(new WavefrontLane(lane, kWavefrontPathCountGPU));
+
+					{
+						SCOPED_PROFILE("compile_kernels_main()");
+						_wavefront_lanes[index]->compile_kernels_main();
+					}
+				});
+			}
+			for (auto &device_setup : device_setups) {
+				make_edge(origin_node, device_setup);
+			}
+
+			node load_scene_node(g, [&](msg) {
+				load_scene_async.wait();
+			});
 			make_edge(origin_node, load_scene_node);
 
-			node setup_node(g, [&](msg) {
-				printf("setup_node\n");
+			_continue = true;
 
-				tbb::task_group g;
-				for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-					int index = i;
-					g.run([index, this] {
-						_wavefront_lanes[index]->setup(_camera, _sceneManager);
-						_wavefront_lanes[index]->initialize(index);
+			std::vector<node> initialize_with_scenes;
+			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+				int index = i;
+				initialize_with_scenes.emplace_back(g, [index, this](msg) {
+					_wavefront_lanes[index]->setup(_camera, _sceneManager);
+					_wavefront_lanes[index]->initialize(index);
+
+					// start render
+					_workers.emplace_back([index, this]() {
+						while (_continue) {
+							printf("wavefront[%d] step\n", index);
+							_wavefront_lanes[index]->step();
+						}
 					});
-				}
-				g.wait();
+				});
+			}
+
+			node on_initialized_node(g, [&](msg) {
+				// create image
+				_workers.emplace_back([this, margin_period_ms]() {
+					while (_continue) {
+						int max_step = 0;
+						for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+							max_step = std::max(max_step, _wavefront_lanes[i]->step_count());
+						}
+						if (4 < max_step) {
+							// Stopwatch sw;
+							create_color_image();
+							// printf("create_color_image %f \n", sw.elapsed());
+						}
+
+						std::this_thread::sleep_for(std::chrono::milliseconds(margin_period_ms));
+					}
+				});
 			});
-			make_edge(load_scene_node, setup_node);
-			make_edge(compile_kernels_main_node, setup_node);
+
+			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+				make_edge(load_scene_node,  initialize_with_scenes[i]);
+				make_edge(device_setups[i], initialize_with_scenes[i]);
+
+				make_edge(initialize_with_scenes[i], on_initialized_node);
+			}
 
 			origin_node.try_put(tbb::flow::continue_msg());
 			g.wait_for_all();
@@ -1365,37 +1388,37 @@ namespace rt {
 			}
 		}
 
-		void launch(int margin_period_ms) {
-			stopwatch_after_launch = Stopwatch();
+		//void launch(int margin_period_ms) {
+		//	stopwatch_after_launch = Stopwatch();
 
-			_continue = true;
+		//	_continue = true;
 
-			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-				auto wavefront_lane = _wavefront_lanes[i].get();
-				_workers.emplace_back([wavefront_lane, this]() {
-					while (_continue) {
-						wavefront_lane->step();
-					}
-				});
-			}
+		//	for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+		//		auto wavefront_lane = _wavefront_lanes[i].get();
+		//		_workers.emplace_back([wavefront_lane, this]() {
+		//			while (_continue) {
+		//				wavefront_lane->step();
+		//			}
+		//		});
+		//	}
 
-			// create image
-			_workers.emplace_back([this, margin_period_ms]() {
-				while (_continue) {
-					int max_step = 0;
-					for (int i = 0; i < _wavefront_lanes.size(); ++i) {
-						max_step = std::max(max_step, _wavefront_lanes[i]->step_count());
-					}
-					if (4 < max_step) {
-						// Stopwatch sw;
-						create_color_image();
-						// printf("create_color_image %f \n", sw.elapsed());
-					}
+		//	// create image
+		//	_workers.emplace_back([this, margin_period_ms]() {
+		//		while (_continue) {
+		//			int max_step = 0;
+		//			for (int i = 0; i < _wavefront_lanes.size(); ++i) {
+		//				max_step = std::max(max_step, _wavefront_lanes[i]->step_count());
+		//			}
+		//			if (4 < max_step) {
+		//				// Stopwatch sw;
+		//				create_color_image();
+		//				// printf("create_color_image %f \n", sw.elapsed());
+		//			}
 
-					std::this_thread::sleep_for(std::chrono::milliseconds(margin_period_ms));
-				}
-			});
-		}
+		//			std::this_thread::sleep_for(std::chrono::milliseconds(margin_period_ms));
+		//		}
+		//	});
+		//}
 
 
 		void launch_fixed(int steps) {

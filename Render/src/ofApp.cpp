@@ -7,7 +7,6 @@
 
 using namespace rt;
 
-OpenCLContext *context_ptr;
 WavefrontPathTracing *pt = nullptr;
 
 //--------------------------------------------------------------
@@ -24,9 +23,7 @@ void ofApp::initialize_render() {
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
 	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
-	// pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU);
-	pt = new WavefrontPathTracing(abcPath, RenderMode_SingleGPU);
-	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
+	pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU, 300 /* margin_period_ms */, [](RGBA8ValueType *p, int w, int h) {
 		ofPixels imagedata;
 		imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
 
@@ -35,8 +32,7 @@ void ofApp::initialize_render() {
 		sprintf(name, "render_%d.png", i++);
 		ofSaveImage(imagedata, name);
 		printf("saved %s, %.2f s\n", name, ofGetElapsedTimef());
-	};
-	pt->launch(3000);
+	});
 
 	END_PROFILE();
 	SAVE_PROFILE(ofToDataPath("initialize_profile.json").c_str());
@@ -51,8 +47,6 @@ void ofApp::exit() {
 
 	delete pt;
 	pt = nullptr;
-	delete context_ptr;
-	context_ptr = nullptr;
 }
 
 //--------------------------------------------------------------

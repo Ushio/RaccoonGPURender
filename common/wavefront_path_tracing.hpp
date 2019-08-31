@@ -1278,7 +1278,6 @@ namespace rt {
 					// start render
 					_workers.emplace_back([index, this]() {
 						while (_continue) {
-							printf("wavefront[%d] step\n", index);
 							_wavefront_lanes[index]->step();
 						}
 					});

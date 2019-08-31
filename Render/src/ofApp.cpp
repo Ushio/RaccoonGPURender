@@ -24,6 +24,26 @@ void ofApp::initialize_render() {
 	env.addInclude(ofToDataPath("../../../kernels"));
 	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
 	pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU, 300 /* margin_period_ms */, [](RGBA8ValueType *p, int w, int h) {
+		printf("-- step count --\n");
+		printf("[");
+		for (int i = 0; i < pt->_wavefront_lanes.size(); ++i) {
+			printf("%d", pt->_wavefront_lanes[i]->step_count());
+			if (i + 1 < pt->_wavefront_lanes.size()) {
+				printf(", ");
+			}
+		}
+		printf("]\n");
+
+		printf("-- avg sample count --\n");
+		printf("[");
+		for (int i = 0; i < pt->_wavefront_lanes.size(); ++i) {
+			printf("%.1f", pt->_wavefront_lanes[i]->stat_avg_sample());
+			if (i + 1 < pt->_wavefront_lanes.size()) {
+				printf(", ");
+			}
+		}
+		printf("]\n");
+
 		ofPixels imagedata;
 		imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
 

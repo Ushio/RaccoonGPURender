@@ -531,11 +531,14 @@ namespace rt {
 		void initialize(int lane_index, int num_device) {
 			SCOPED_PROFILE("WavefrontLane::initialize()");
 
-			//_step_queue->finish();
-			//_step_data_transfer->finish();
-			//_finalize_queue->finish();
+			_step_queue->finish();
+			_step_data_transfer->finish();
+			_finalize_queue->finish();
 
 			auto sq = _step_queue->queue();
+
+			int allpixel = _camera.resolution_x * _camera.resolution_y;
+			_mem_next_pixel_index->fill(lane_index * (allpixel / num_device), sq);
 
 			_kernel_random_initialize->setArguments(
 				_mem_random_state->memory(),
@@ -561,9 +564,6 @@ namespace rt {
 			_intermediate_mutex->fill(1, sq);
 			_is_holding_intermediate_in_step->fill(0, sq);
 			_is_holding_intermediate_in_merge->fill(0, sq);
-
-			int allpixel = _camera.resolution_x * _camera.resolution_y;
-			_mem_next_pixel_index->fill(lane_index * (allpixel / num_device), sq);
 
 			_avg_sample = 0;
 		}

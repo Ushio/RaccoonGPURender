@@ -25,8 +25,8 @@ void ofApp::initialize_render() {
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
-	std::string abcPath = ofToDataPath("../../../scenes/rtcamp_big.abc", true);
-	// std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
+	// std::string abcPath = ofToDataPath("../../../scenes/rtcamp_big.abc", true);
+	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
 
 	pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU, 300 /* margin_period_ms */, [](RGBA8ValueType *p, int w, int h) {
 		printf("-- step count --\n");
@@ -58,7 +58,9 @@ void ofApp::initialize_render() {
 
 		static int i = 0;
 		char name[64];
-		sprintf(name, "render_%d.png", i++);
+		// sprintf(name, "render_%d.png", i++);
+		sprintf(name, "../../../output_images/render_%d.png", i++);
+		
 		libattopng_save(png, ofToDataPath(name).c_str());
 		png->data = nullptr;
 		libattopng_destroy(png);
@@ -79,7 +81,7 @@ void ofApp::initialize_render() {
 	});
 
 	END_PROFILE();
-	SAVE_PROFILE(ofToDataPath("initialize_profile.json").c_str());
+	SAVE_PROFILE(ofToDataPath("../../../output_images/initialize_profile.json").c_str());
 	CLEAR_PROFILE();
 }
 void ofApp::exit() {

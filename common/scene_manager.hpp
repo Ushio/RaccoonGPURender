@@ -46,6 +46,7 @@ namespace rt {
 			Node *next = nullptr;
 		};
 
+		// it is not thread safe
 		void add(const T &value) {
 			if (_head == nullptr) {
 				_head = _tail = new Node();
@@ -61,8 +62,18 @@ namespace rt {
 			_tail->buffer.emplace_back(value);
 			_size++;
 		}
+		// it is not thread safe
+		void reserve(std::size_t s) {
+			if (_head == nullptr) {
+				_head = _tail = new Node();
+				_tail->buffer.reserve(s);
+			}
+		}
 
-		T *data() {
+		// if not call add, reserve, then thread safe
+		const T *data() const {
+			std::lock_guard<std::mutex> lc(_mutex);
+
 			if (_head == nullptr) {
 				return nullptr;
 			}
@@ -84,18 +95,12 @@ namespace rt {
 		size_t size() const {
 			return _size;
 		}
-		void reserve(std::size_t s) {
-			if (_head == nullptr) {
-				_head = _tail = new Node();
-				_tail->buffer.reserve(s);
-			}
-		}
 	public:
+		mutable std::mutex _mutex;
 		size_t _size = 0;
 		Node *_head = nullptr;
 		Node *_tail = nullptr;
-
-		std::vector<T> _data;
+		mutable std::vector<T> _data;
 	};
 
 	struct MaterialStorage {
@@ -123,7 +128,7 @@ namespace rt {
 				_elements.reserve(s);
 			}
 		private:
-			mutable LinkedBuffer<T> _elements;
+			LinkedBuffer<T> _elements;
 		};
 		std::unordered_map<type_index, std::shared_ptr<Storage>> _storages;
 

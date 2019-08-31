@@ -16,7 +16,7 @@
 #include "timeline_profiler.hpp"
 
 namespace rt {
-	static const uint32_t kWavefrontPathCountGPU = 1 << 24; /* 2^24 */
+	static const uint32_t kWavefrontPathCountGPU = 1 << 21; /* 2^21 */
 	static const uint32_t kWavefrontPathCountCPU = 1 << 19; /* 2^19 */
 
 	struct WavefrontPath {
@@ -75,7 +75,7 @@ namespace rt {
 	};
 
 	// Intermediate
-	struct alignas(16) RGB16IntermediateValueType {
+	struct alignas(8) RGB16IntermediateValueType {
 		uint16_t r_divided;
 		uint16_t g_divided;
 		uint16_t b_divided;
@@ -403,11 +403,11 @@ namespace rt {
 				_kernel_strategy_selection = unique(new OpenCLKernel("strategy_selection", program_mixture_density.program()));
 			});
 
-			g.run([this, lane]() {
-				OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id, lane.device_name);
-				_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
-				_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
-			});
+			//g.run([this, lane]() {
+			//	OpenCLProgram program_inspect("inspect.cl", lane.context, lane.device_id, lane.device_name);
+			//	_kernel_visualize_intersect_normal = unique(new OpenCLKernel("visualize_intersect_normal", program_inspect.program()));
+			//	_kernel_RGB32Accumulation_to_RGBA8_linear = unique(new OpenCLKernel("RGB32Accumulation_to_RGBA8_linear", program_inspect.program()));
+			//});
 
 			g.run([this, lane]() {
 				OpenCLProgram program_accumlation("accumlation.cl", lane.context, lane.device_id, lane.device_name);
@@ -458,43 +458,56 @@ namespace rt {
 
 			uint64_t kZero64 = 0;
 			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1, OpenCLKernelBufferMode::ReadWrite));
-
 			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
-
 			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_inVolumeLists = unique(new OpenCLBuffer<InVolumeList>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
-
 			_mem_incident_samples = unique(new OpenCLBuffer<IncidentSample>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
-			// envmap
 			_queue_new_path = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_lambertian = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_specular = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_dierectric = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_ward = unique(new StageQueue(lane.context, _wavefrontPathCount));
+
 			_queue_homogeneousMediumInside  = unique(new StageQueue(lane.context, _wavefrontPathCount));
 			_queue_homogeneousMediumSurface = unique(new StageQueue(lane.context, _wavefrontPathCount));
 
-			_queue_sample_env_6axis = unique(new StageQueue(lane.context, _wavefrontPathCount));
-			_queue_eval_env_6axis_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
-			_queue_sample_env = unique(new StageQueue(lane.context, _wavefrontPathCount));
-			_queue_eval_env_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			// envmap
+			{
+				SCOPED_PROFILE("envmap");
+				_queue_sample_env_6axis = unique(new StageQueue(lane.context, _wavefrontPathCount));
+				_queue_eval_env_6axis_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
+				_queue_sample_env = unique(new StageQueue(lane.context, _wavefrontPathCount));
+				_queue_eval_env_pdf = unique(new StageQueue(lane.context, _wavefrontPathCount));
+			}
 
-			_sceneBuffer = sceneManager.createBuffer(lane.context);
-			_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
-			_envmapBuffer = sceneManager.createEnvmapBuffer(lane.context);
+			{
+				SCOPED_PROFILE("_sceneBuffer");
+				_sceneBuffer = sceneManager.createBuffer(lane.context);
+			}
+			{
+				SCOPED_PROFILE("_materialBuffer");
+				_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
+			}
+			{
+				SCOPED_PROFILE("_envmapBuffer");
+				_envmapBuffer = sceneManager.createEnvmapBuffer(lane.context);
+			}
 
 			// accumlation
-			_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
-			_accum_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
+			{
+				SCOPED_PROFILE("_accum_color");
+				_accum_color = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
+			}
+			// _accum_normal = unique(new OpenCLBuffer<RGB32AccumulationValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
 			
 			// inspect
-			_aov_normal_rgb8 = unique(new PeriodicReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
-
+			// _aov_normal_rgb8 = unique(new PeriodicReadableBuffer<RGBA8ValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
+		
 			_accum_color_intermediate_shared = unique(new OpenCLBuffer<RGB16IntermediateValueType>(lane.context, _camera.resolution_x * _camera.resolution_y, OpenCLKernelBufferMode::ReadWrite));
 			_accum_color_intermediate       = unique(new ReadableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
 			_accum_color_intermediate_other = unique(new WritableBuffer<RGB16IntermediateValueType>(lane.context, lane.queue, _camera.resolution_x * _camera.resolution_y));
-
+			
 			_intermediate_mutex = unique(new OpenCLBuffer<int32_t>(lane.context, 1, rt::OpenCLKernelBufferMode::ReadWrite));
 			_is_holding_intermediate_in_step = unique(new OpenCLBuffer<int32_t>(lane.context, 1, rt::OpenCLKernelBufferMode::ReadWrite));
 			_is_holding_intermediate_in_merge = unique(new ReadableBuffer<int32_t>(lane.context, lane.queue, 1));
@@ -542,7 +555,7 @@ namespace rt {
 
 			// clear buffer
 			_accum_color->fill(RGB32AccumulationValueType(), sq);
-			_accum_normal->fill(RGB32AccumulationValueType(), sq);
+			// _accum_normal->fill(RGB32AccumulationValueType(), sq);
 
 			// initialize_mutex
 			_intermediate_mutex->fill(1, sq);
@@ -837,7 +850,7 @@ namespace rt {
 					_mem_shading_results->memory(),
 					_envmapBuffer->envmap->memory(),
 					_accum_color->memory(),
-					_accum_normal->memory(),
+					// _accum_normal->memory(),
 					_materialBuffer->materials->memory(),
 					_queue_new_path->item(),
 					_queue_new_path->count(),
@@ -882,22 +895,22 @@ namespace rt {
 			_step_queue->flush();
 
 			// for previews
-			if (onNormalRecieved) {
-				_aov_normal_rgb8->mark_begin_touch(_step_queue->queue());
+			//if (onNormalRecieved) {
+			//	_aov_normal_rgb8->mark_begin_touch(_step_queue->queue());
 
-				_kernel_RGB32Accumulation_to_RGBA8_linear->setArguments(
-					_accum_normal->memory(),
-					_aov_normal_rgb8->memory()
-				);
-				auto touch_buffer = _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_step_queue->queue(), 0, _camera.resolution_x * _camera.resolution_y);
+			//	_kernel_RGB32Accumulation_to_RGBA8_linear->setArguments(
+			//		_accum_normal->memory(),
+			//		_aov_normal_rgb8->memory()
+			//	);
+			//	auto touch_buffer = _kernel_RGB32Accumulation_to_RGBA8_linear->launch(_step_queue->queue(), 0, _camera.resolution_x * _camera.resolution_y);
 
-				auto f = onNormalRecieved;
-				int w = _camera.resolution_x;
-				int h = _camera.resolution_y;
-				_aov_normal_rgb8->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _step_data_transfer->queue(), [f, w, h](RGBA8ValueType *ptr) {
-					f(ptr, w, h);
-				});
-			}
+			//	auto f = onNormalRecieved;
+			//	int w = _camera.resolution_x;
+			//	int h = _camera.resolution_y;
+			//	_aov_normal_rgb8->mark_end_touch_and_schedule_read(_lane.context, touch_buffer, _step_data_transfer->queue(), [f, w, h](RGBA8ValueType *ptr) {
+			//		f(ptr, w, h);
+			//	});
+			//}
 
 			// for stat
 			_all_sample_count->mark_begin_touch(_step_queue->queue());
@@ -1050,8 +1063,8 @@ namespace rt {
 
 		std::unique_ptr<OpenCLKernel> _kernel_strategy_selection;
 
-		std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
-		std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
+		// std::unique_ptr<OpenCLKernel> _kernel_visualize_intersect_normal;
+		// std::unique_ptr<OpenCLKernel> _kernel_RGB32Accumulation_to_RGBA8_linear;
 
 		std::unique_ptr<OpenCLKernel> _kernel_accumlation_to_intermediate;
 		std::unique_ptr<OpenCLKernel> _kernel_merge_intermediate;
@@ -1092,10 +1105,10 @@ namespace rt {
 
 		// Accumlation Buffer
 		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_color;
-		std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_normal;
+		// std::unique_ptr<OpenCLBuffer<RGB32AccumulationValueType>> _accum_normal;
 
 		// Inspect internal buffer
-		std::unique_ptr<PeriodicReadableBuffer<RGBA8ValueType>> _aov_normal_rgb8;
+		// std::unique_ptr<PeriodicReadableBuffer<RGBA8ValueType>> _aov_normal_rgb8;
 
 		// Mutex 
 		std::unique_ptr<OpenCLBuffer<int32_t>> _intermediate_mutex;
@@ -1111,7 +1124,7 @@ namespace rt {
 		EventQueue _eventQueue;
 
 		// public events, onNormalRecieved( pointer, width, height )
-		std::function<void(RGBA8ValueType *, int, int)> onNormalRecieved;
+		// std::function<void(RGBA8ValueType *, int, int)> onNormalRecieved;
 
 		// for data transfer synchronization
 		// WorkerThread _copy_worker;

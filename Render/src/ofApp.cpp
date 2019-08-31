@@ -22,7 +22,9 @@ void ofApp::initialize_render() {
 	auto &env = OpenCLProgramEnvioronment::instance();
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
-	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
+	std::string abcPath = ofToDataPath("../../../scenes/rtcamp_big.abc", true);
+	// std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
+
 	pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU, 300 /* margin_period_ms */, [](RGBA8ValueType *p, int w, int h) {
 		printf("-- step count --\n");
 		printf("[");

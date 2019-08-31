@@ -20,7 +20,6 @@ public:
 		{
 			std::lock_guard<std::mutex> scoped_lock(_mutex);
 			_imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
-			
 
 			static int i = 0;
 			if (i++ % 50 == 0) {
@@ -104,19 +103,12 @@ void ofApp::initialize_render() {
 	env.setSourceDirectory(ofToDataPath("../../../kernels"));
 	env.addInclude(ofToDataPath("../../../kernels"));
 	std::string abcPath = ofToDataPath("../../../scenes/rtcamp.abc", true);
-	// pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU);
-	pt = new WavefrontPathTracing(abcPath, RenderMode_SingleGPU);
+
+	pt = new WavefrontPathTracing(abcPath, RenderMode_ALLGPU, 50 /* margin_period_ms */, [](RGBA8ValueType *p, int w, int h) {
+		colorReciever.setImageAtomic(p, w, h);
+	});
 
 	context_ptr = pt->context();
-
-	pt->onColorRecieved = [](RGBA8ValueType *p, int w, int h) {
-		colorReciever.setImageAtomic(p, w, h);
-	};
-
-	//pt->_wavefront_lanes[0]->onNormalRecieved = [](RGBA8ValueType *p, int w, int h) {
-	//	normalReciever.setImageAtomic(p, w, h);
-	//};
-	pt->launch(50);
 
 	END_PROFILE();
 	SAVE_PROFILE(ofToDataPath("initialize_profile.json").c_str());

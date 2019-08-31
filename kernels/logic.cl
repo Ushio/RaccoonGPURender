@@ -31,7 +31,7 @@ __kernel void logic(
     __global ShadingResult *shading_results,
     __read_only image2d_t envmap,
     __global RGB32AccumulationValueType *rgb32accum,
-    __global RGB32AccumulationValueType *normal32accum,
+    // __global RGB32AccumulationValueType *normal32accum,
     __global const Material *materials,
     __global uint *new_path_queue_item,
     __global uint *new_path_queue_count,
@@ -107,19 +107,19 @@ __kernel void logic(
     }
 
     // debug normal
-    if(logic_i == 0) {
-        float3 color;
-        if(0 <= hit_surface_material) {
-            color = (float3)(0.0f);
-        } else {
-            color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;
-        }
-        uint pixel_index = wavefrontPath[gid].pixel_index;
-        atomic_add_global(&normal32accum[pixel_index].r, color.x);
-        atomic_add_global(&normal32accum[pixel_index].g, color.y);
-        atomic_add_global(&normal32accum[pixel_index].b, color.z);
-        atomic_inc(&normal32accum[pixel_index].sampleCount);
-    }
+    // if(logic_i == 0) {
+    //     float3 color;
+    //     if(0 <= hit_surface_material) {
+    //         color = (float3)(0.0f);
+    //     } else {
+    //         color = (extension_results[gid].Ng + (float3)(1.0f)) * 0.5f;
+    //     }
+    //     uint pixel_index = wavefrontPath[gid].pixel_index;
+    //     atomic_add_global(&normal32accum[pixel_index].r, color.x);
+    //     atomic_add_global(&normal32accum[pixel_index].g, color.y);
+    //     atomic_add_global(&normal32accum[pixel_index].b, color.z);
+    //     atomic_inc(&normal32accum[pixel_index].sampleCount);
+    // }
 
     // add contribution
     if(newPath) {

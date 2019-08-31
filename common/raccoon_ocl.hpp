@@ -279,6 +279,18 @@ namespace rt {
 		WriteToDevice,
 	};
 
+#define MEMORY_USAGE_PRINT 0
+#if MEMORY_USAGE_PRINT
+	class MemoryStat {
+	public:
+		static MemoryStat &instance() {
+			static MemoryStat i;
+			return i;
+		}
+		uint64_t memory_usage = 0;
+	};
+#endif
+
 	template <class T>
 	class OpenCLPinnedBuffer {
 	public:
@@ -299,6 +311,13 @@ namespace rt {
 			default:
 				RAC_ASSERT(0, "");
 			}
+
+#if MEMORY_USAGE_PRINT
+			// only single thread
+			MemoryStat::instance().memory_usage += sizeof(T) * length;
+			printf("memory_usage=%lld, alloc=%d\n", MemoryStat::instance().memory_usage, sizeof(T) * length);
+#endif
+
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, length * sizeof(T), nullptr, &status);
 			RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
@@ -337,10 +356,6 @@ namespace rt {
 			: _context(context)
 			, _length(length) {
 
-			// static uint64_t memory_usage = 0;
-			// memory_usage += sizeof(T) * length;
-			// printf("memory_usage=%lld, alloc=%d\n", memory_usage, sizeof(T) * length);
-
 			cl_mem_flags mem_flags = CL_MEM_READ_WRITE;
 			switch (mode) {
 			case OpenCLKernelBufferMode::ReadWrite:
@@ -355,6 +370,12 @@ namespace rt {
 			default:
 				RAC_ASSERT(0, "");
 			}
+
+#if MEMORY_USAGE_PRINT
+			// only single thread
+			MemoryStat::instance().memory_usage += sizeof(T) * length;
+			printf("memory_usage=%lld, alloc=%d\n", MemoryStat::instance().memory_usage, sizeof(T) * length);
+#endif
 
 			// http://wiki.tommy6.net/wiki/clCreateBuffer
 			cl_int status;
@@ -381,6 +402,12 @@ namespace rt {
 			default:
 				RAC_ASSERT(0, "");
 			}
+
+#if MEMORY_USAGE_PRINT
+			// only single thread
+			MemoryStat::instance().memory_usage += sizeof(T) * length;
+			printf("memory_usage=%lld, alloc=%d\n", MemoryStat::instance().memory_usage, sizeof(T) * length);
+#endif
 
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, mem_flags, length * sizeof(T), nullptr, &status);
@@ -603,6 +630,11 @@ namespace rt {
 					cl_uint compute_units;
 					status = clGetDeviceInfo(device_id, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, nullptr);
 					RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+
+					//cl_ulong max_mem_alloc_size;
+					//status = clGetDeviceInfo(device_id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(max_mem_alloc_size), &max_mem_alloc_size, nullptr);
+					//RAC_ASSERT(status == CL_SUCCESS, "clGetDeviceInfo() failed");
+					//printf("max_mem_alloc_size=%lu\n", max_mem_alloc_size);
 
 					if (skipCPU) {
 						if (device_info.is_gpu == false) {

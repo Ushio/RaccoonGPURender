@@ -302,9 +302,9 @@ namespace rt {
 	class StageQueue {
 	public:
 		StageQueue(cl_context context, int size) {
-			uint32_t kZero = 0;
+			static uint32_t kZero = 0;
 			_item = unique(new OpenCLBuffer<uint32_t>(context, size, OpenCLKernelBufferMode::ReadWrite));
-			_count = unique(new OpenCLBuffer<uint32_t>(context, &kZero, 1, OpenCLKernelBufferMode::ReadWrite));
+			_count = unique(new OpenCLBuffer<uint32_t>(context, &kZero, 1, OpenCLKernelBufferMode::ReadWrite, true));
 		}
 		cl_mem item() const {
 			return _item->memory();
@@ -456,8 +456,8 @@ namespace rt {
 			_mem_random_state = unique(new OpenCLBuffer<glm::uvec4>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
-			uint64_t kZero64 = 0;
-			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1, OpenCLKernelBufferMode::ReadWrite));
+			static uint64_t kZero64 = 0;
+			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1, OpenCLKernelBufferMode::ReadWrite, true));
 			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_inVolumeLists = unique(new OpenCLBuffer<InVolumeList>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -1238,6 +1238,9 @@ namespace rt {
 				if (renderMode == RenderMode_SingleGPU) {
 					break;
 				}
+				//if (3 <= device_index) {
+				//	break;
+				//}
 			}
 
 			std::vector<node> device_setups;

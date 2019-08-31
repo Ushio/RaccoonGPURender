@@ -352,7 +352,7 @@ namespace rt {
 	template <class T>
 	class OpenCLBuffer {
 	public:
-		OpenCLBuffer(cl_context context, const T *value, uint32_t length, OpenCLKernelBufferMode mode)
+		OpenCLBuffer(cl_context context, const T *value, uint32_t length, OpenCLKernelBufferMode mode, bool value_pointer_persistent = false)
 			: _context(context)
 			, _length(length) {
 
@@ -377,12 +377,24 @@ namespace rt {
 			printf("memory_usage=%lld, alloc=%d\n", MemoryStat::instance().memory_usage, sizeof(T) * length);
 #endif
 
+			// Stopwatch sw;
 			// http://wiki.tommy6.net/wiki/clCreateBuffer
 			cl_int status;
-			cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);
-			RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
-			RAC_ASSERT(memory, "clCreateBuffer() failed");
-			_memory = decltype(_memory)(memory, clReleaseMemObject);
+
+			if (value_pointer_persistent) {
+				cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_USE_HOST_PTR, length * sizeof(T), (void *)value, &status);
+				RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
+				RAC_ASSERT(memory, "clCreateBuffer() failed");
+				_memory = decltype(_memory)(memory, clReleaseMemObject);
+			}
+			else {
+				cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);
+				RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
+				RAC_ASSERT(memory, "clCreateBuffer() failed");
+				_memory = decltype(_memory)(memory, clReleaseMemObject);
+			}
+
+			// printf("clCreateBuffer %u bytes, %.3f s, CL_MEM_COPY_HOST_PTR\n", sizeof(T) * length, sw.elapsed());
 		}
 		OpenCLBuffer(cl_context context, uint32_t length, OpenCLKernelBufferMode mode)
 			: _context(context)
@@ -408,7 +420,6 @@ namespace rt {
 			MemoryStat::instance().memory_usage += sizeof(T) * length;
 			printf("memory_usage=%lld, alloc=%d\n", MemoryStat::instance().memory_usage, sizeof(T) * length);
 #endif
-
 			cl_int status;
 			cl_mem memory = clCreateBuffer(context, mem_flags, length * sizeof(T), nullptr, &status);
 			RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");

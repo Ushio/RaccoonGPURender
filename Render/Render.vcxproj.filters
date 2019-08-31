@@ -415,6 +415,9 @@
     <ClCompile Include="..\libs\stb\stb.cpp">
       <Filter>src\stb</Filter>
     </ClCompile>
+    <ClCompile Include="src\libattopng.c">
+      <Filter>src</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="src">
@@ -1120,6 +1123,9 @@
     </ClInclude>
     <ClInclude Include="..\libs\stb\stb_image_write.h">
       <Filter>src\stb</Filter>
+    </ClInclude>
+    <ClInclude Include="src\libattopng.h">
+      <Filter>src</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

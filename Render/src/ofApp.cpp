@@ -5,12 +5,15 @@
 #include "wavefront_path_tracing.hpp"
 #include "timeline_profiler.hpp"
 
+#include "libattopng.h"
+
 using namespace rt;
 
 WavefrontPathTracing *pt = nullptr;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
+
 	ofSetVerticalSync(false);
 	ofSetFrameRate(30);
 
@@ -46,14 +49,33 @@ void ofApp::initialize_render() {
 		}
 		printf("]\n");
 
-		ofPixels imagedata;
-		imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
+		Stopwatch sw;
+
+		libattopng_t* png = libattopng_new(w, h, PNG_RGBA);
+
+		// This is dirty hack. too bad but fast.
+		png->data = (char *)p;
 
 		static int i = 0;
 		char name[64];
 		sprintf(name, "render_%d.png", i++);
-		ofSaveImage(imagedata, name);
-		printf("saved %s, %.2f s\n", name, ofGetElapsedTimef());
+		libattopng_save(png, ofToDataPath(name).c_str());
+		png->data = nullptr;
+		libattopng_destroy(png);
+
+		printf("saved %s, at %.2f s\n", name, ofGetElapsedTimef());
+		printf("  png save %.2f s\n", sw.elapsed());
+
+		//ofPixels imagedata;
+		//imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
+
+		//static int i = 0;
+		//char name[64];
+		//sprintf(name, "render_%d.png", i++);
+		//Stopwatch sw;
+		//ofSaveImage(imagedata, name);
+		//printf("ofSaveImage %.2f s\n", sw.elapsed());
+		//printf("saved %s, %.2f s\n", name, ofGetElapsedTimef());
 	});
 
 	END_PROFILE();

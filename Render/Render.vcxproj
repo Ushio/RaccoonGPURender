@@ -324,6 +324,7 @@
     <ClCompile Include="..\libs\ofxRaccoonImGui\imgui_widgets.cpp" />
     <ClCompile Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.cpp" />
     <ClCompile Include="..\libs\stb\stb.cpp" />
+    <ClCompile Include="src\libattopng.c" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\ofApp.cpp" />
   </ItemGroup>
@@ -556,6 +557,7 @@
     <ClInclude Include="..\libs\ofxRaccoonImGui\ofxRaccoonImGui.hpp" />
     <ClInclude Include="..\libs\stb\stb_image.h" />
     <ClInclude Include="..\libs\stb\stb_image_write.h" />
+    <ClInclude Include="src\libattopng.h" />
     <ClInclude Include="src\ofApp.h" />
   </ItemGroup>
   <ItemGroup>

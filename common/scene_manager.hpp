@@ -27,6 +27,77 @@ namespace rt {
 		return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, data, size, OpenCLKernelBufferMode::ReadOnly));
 	}
 
+	template <class T>
+	class LinkedBuffer {
+	public:
+		LinkedBuffer() {}
+		~LinkedBuffer() {
+			while (_head) {
+				auto next = _head->next;
+				delete _head;
+				_head = next;
+			}
+		}
+		LinkedBuffer(const LinkedBuffer &) = delete;
+		void operator=(const LinkedBuffer &) = delete;
+
+		struct Node {
+			std::vector<T> buffer;
+			Node *next = nullptr;
+		};
+
+		void add(const T &value) {
+			if (_head == nullptr) {
+				_head = _tail = new Node();
+				_tail->buffer.reserve(32);
+			}
+			if (_tail->buffer.size() == _tail->buffer.capacity()) {
+				auto tail = new Node();
+				tail->buffer.reserve(_tail->buffer.size() * 2);
+				_tail->next = tail;
+				_tail = tail;
+			}
+
+			_tail->buffer.emplace_back(value);
+			_size++;
+		}
+
+		T *data() {
+			if (_head == nullptr) {
+				return nullptr;
+			}
+			if (_head == _tail) {
+				return _head->buffer.data();
+			}
+			if (_data.size() != _size) {
+				_data.clear();
+				_data.reserve(_size);
+
+				for (auto node = _head; node != nullptr; node = node->next) {
+					for (int i = 0; i < node->buffer.size(); ++i) {
+						_data.emplace_back(node->buffer[i]);
+					}
+				}
+			}
+			return _data.data();
+		}
+		size_t size() const {
+			return _size;
+		}
+		void reserve(std::size_t s) {
+			if (_head == nullptr) {
+				_head = _tail = new Node();
+				_tail->buffer.reserve(s);
+			}
+		}
+	public:
+		size_t _size = 0;
+		Node *_head = nullptr;
+		Node *_tail = nullptr;
+
+		std::vector<T> _data;
+	};
+
 	struct MaterialStorage {
 		std::vector<Material> materials;
 		
@@ -43,7 +114,7 @@ namespace rt {
 				return (int)_elements.size();
 			}
 			void add(const T &e) {
-				_elements.emplace_back(e);
+				_elements.add(e);
 			}
 			const T *data() const {
 				return _elements.data();
@@ -52,7 +123,7 @@ namespace rt {
 				_elements.reserve(s);
 			}
 		private:
-			std::vector<T> _elements;
+			mutable LinkedBuffer<T> _elements;
 		};
 		std::unordered_map<type_index, std::shared_ptr<Storage>> _storages;
 

@@ -304,7 +304,7 @@ namespace rt {
 		StageQueue(cl_context context, int size) {
 			static uint32_t kZero = 0;
 			_item = unique(new OpenCLBuffer<uint32_t>(context, size, OpenCLKernelBufferMode::ReadWrite));
-			_count = unique(new OpenCLBuffer<uint32_t>(context, &kZero, 1, OpenCLKernelBufferMode::ReadWrite, true));
+			_count = unique(new OpenCLBuffer<uint32_t>(context, &kZero, 1, OpenCLKernelBufferMode::ReadWrite));
 		}
 		cl_mem item() const {
 			return _item->memory();
@@ -457,7 +457,7 @@ namespace rt {
 			_mem_path = unique(new OpenCLBuffer<WavefrontPath>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 
 			static uint64_t kZero64 = 0;
-			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1, OpenCLKernelBufferMode::ReadWrite, true));
+			_mem_next_pixel_index = unique(new OpenCLBuffer<uint64_t>(lane.context, &kZero64, 1, OpenCLKernelBufferMode::ReadWrite));
 			_mem_extension_results = unique(new OpenCLBuffer<ExtensionResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_shading_results = unique(new OpenCLBuffer<ShadingResult>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
 			_mem_inVolumeLists = unique(new OpenCLBuffer<InVolumeList>(lane.context, _wavefrontPathCount, OpenCLKernelBufferMode::ReadWrite));
@@ -483,11 +483,11 @@ namespace rt {
 
 			{
 				SCOPED_PROFILE("_sceneBuffer");
-				_sceneBuffer = sceneManager.createBuffer(lane.context);
+				_sceneBuffer = sceneManager.createBuffer(lane.context, _step_queue->queue());
 			}
 			{
 				SCOPED_PROFILE("_materialBuffer");
-				_materialBuffer = sceneManager.createMaterialBuffer(lane.context);
+				_materialBuffer = sceneManager.createMaterialBuffer(lane.context, _step_queue->queue());
 			}
 			{
 				SCOPED_PROFILE("_envmapBuffer");
@@ -528,12 +528,12 @@ namespace rt {
 			_finalize_queue->finish();
 		}
 
-		void initialize(int lane_index) {
+		void initialize(int lane_index, int num_device) {
 			SCOPED_PROFILE("WavefrontLane::initialize()");
 
-			_step_queue->finish();
-			_step_data_transfer->finish();
-			_finalize_queue->finish();
+			//_step_queue->finish();
+			//_step_data_transfer->finish();
+			//_finalize_queue->finish();
 
 			auto sq = _step_queue->queue();
 
@@ -561,6 +561,9 @@ namespace rt {
 			_intermediate_mutex->fill(1, sq);
 			_is_holding_intermediate_in_step->fill(0, sq);
 			_is_holding_intermediate_in_merge->fill(0, sq);
+
+			int allpixel = _camera.resolution_x * _camera.resolution_y;
+			_mem_next_pixel_index->fill(lane_index * (allpixel / num_device), sq);
 
 			_avg_sample = 0;
 		}
@@ -590,7 +593,7 @@ namespace rt {
 				if (_restart_bang) {
 					_camera = _restart_parameter.camera;
 
-					initialize(_restart_parameter.lane_index);
+					initialize(_restart_parameter.lane_index, 1 /*it is not so good*/);
 
 					_step_count = 0;
 
@@ -1289,7 +1292,7 @@ namespace rt {
 				int index = i;
 				initialize_with_scenes.emplace_back(g, [index, this](msg) {
 					_wavefront_lanes[index]->setup(_camera, _sceneManager);
-					_wavefront_lanes[index]->initialize(index);
+					_wavefront_lanes[index]->initialize(index, _wavefront_lanes.size());
 
 					// start render
 					_workers.emplace_back([index, this]() {

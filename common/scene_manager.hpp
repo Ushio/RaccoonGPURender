@@ -19,12 +19,12 @@
 
 namespace rt {
 	template <class T>
-	std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, uint32_t size, bool data_is_persistent) {
+	std::unique_ptr<OpenCLBuffer<T>> createBufferSafe(cl_context context, const T *data, uint32_t size, bool async_write, cl_command_queue queue) {
 		if (size == 0) {
 			T one;
 			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, &one, 1, OpenCLKernelBufferMode::ReadOnly));
 		}
-		return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, data, size, OpenCLKernelBufferMode::ReadOnly, data_is_persistent));
+		return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, data, size, OpenCLKernelBufferMode::ReadOnly, async_write, queue));
 	}
 
 	template <class T>
@@ -160,7 +160,7 @@ namespace rt {
 		}
 
 		template <class T>
-		std::unique_ptr<OpenCLBuffer<T>> createBuffer(cl_context context) const {
+		std::unique_ptr<OpenCLBuffer<T>> createBuffer(cl_context context, cl_command_queue queue) const {
 			auto it = _storages.find(typeid(T));
 			if (it == _storages.end()) {
 				T one;
@@ -168,7 +168,7 @@ namespace rt {
 			}
 			auto storage = static_cast<StorageT<T> *>(it->second.get());
 			
-			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, storage->data(), storage->size(), OpenCLKernelBufferMode::ReadOnly, true));
+			return std::unique_ptr<OpenCLBuffer<T>>(new OpenCLBuffer<T>(context, storage->data(), storage->size(), OpenCLKernelBufferMode::ReadOnly, true, queue));
 		}
 
 		void add_variant(const rttr::variant &instance) {
@@ -576,28 +576,28 @@ namespace rt {
 			}
 		}
 
-		std::unique_ptr<SceneBuffer> createBuffer(cl_context context) const {
+		std::unique_ptr<SceneBuffer> createBuffer(cl_context context, cl_command_queue queue) const {
 			std::unique_ptr<SceneBuffer> buffer(new SceneBuffer());
 			buffer->top_aabb = _stacklessBVH->top_aabb;
-			buffer->pointsCL = createBufferSafe(context, _points.data(), _points.size(), true);
-			buffer->indicesCL = createBufferSafe(context, _indices.data(), _indices.size(), true);
-			buffer->stacklessBVHNodesCL = createBufferSafe(context, _stacklessBVH->nodes.data(), _stacklessBVH->nodes.size(), true);
-			buffer->primitive_idsCL = createBufferSafe(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), true);
+			buffer->pointsCL = createBufferSafe(context, _points.data(), _points.size(), true, queue);
+			buffer->indicesCL = createBufferSafe(context, _indices.data(), _indices.size(), true, queue);
+			buffer->stacklessBVHNodesCL = createBufferSafe(context, _stacklessBVH->nodes.data(), _stacklessBVH->nodes.size(), true, queue);
+			buffer->primitive_idsCL = createBufferSafe(context, _stacklessBVH->primitive_ids.data(), _stacklessBVH->primitive_ids.size(), true, queue);
 			
 			buffer->sphereBegin = _sphereBegin;
-			buffer->spheresCL = createBufferSafe(context, _spheres.data(), _spheres.size(), true);
+			buffer->spheresCL = createBufferSafe(context, _spheres.data(), _spheres.size(), true, queue);
 
 			return buffer;
 		}
 
-		std::unique_ptr<MaterialBuffer> createMaterialBuffer(cl_context context) const {
+		std::unique_ptr<MaterialBuffer> createMaterialBuffer(cl_context context, cl_command_queue queue) const {
 			std::unique_ptr<MaterialBuffer> buffer(new MaterialBuffer());
-			buffer->materials          = createBufferSafe(context, _material_storage->materials.data(), _material_storage->materials.size(), true);
-			buffer->lambertians        = _material_storage->createBuffer<Lambertian>(context);
-			buffer->speculars          = _material_storage->createBuffer<Specular>(context);
-			buffer->dierectrics        = _material_storage->createBuffer<Dierectric>(context);
-			buffer->wards              = _material_storage->createBuffer<Ward>(context);
-			buffer->homogeneousVolume  = _material_storage->createBuffer<HomogeneousVolume>(context);
+			buffer->materials          = createBufferSafe(context, _material_storage->materials.data(), _material_storage->materials.size(), true, queue);
+			buffer->lambertians        = _material_storage->createBuffer<Lambertian>(context, queue);
+			buffer->speculars          = _material_storage->createBuffer<Specular>(context, queue);
+			buffer->dierectrics        = _material_storage->createBuffer<Dierectric>(context, queue);
+			buffer->wards              = _material_storage->createBuffer<Ward>(context, queue);
+			buffer->homogeneousVolume  = _material_storage->createBuffer<HomogeneousVolume>(context, queue);
 			return buffer;
 		}
 

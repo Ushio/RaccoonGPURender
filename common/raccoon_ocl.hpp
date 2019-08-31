@@ -352,7 +352,7 @@ namespace rt {
 	template <class T>
 	class OpenCLBuffer {
 	public:
-		OpenCLBuffer(cl_context context, const T *value, uint32_t length, OpenCLKernelBufferMode mode, bool value_pointer_persistent = false)
+		OpenCLBuffer(cl_context context, const T *value, uint32_t length, OpenCLKernelBufferMode mode, bool async_write = false, cl_command_queue queue = nullptr)
 			: _context(context)
 			, _length(length) {
 
@@ -381,11 +381,14 @@ namespace rt {
 			// http://wiki.tommy6.net/wiki/clCreateBuffer
 			cl_int status;
 
-			if (value_pointer_persistent) {
-				cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_USE_HOST_PTR, length * sizeof(T), (void *)value, &status);
+			if (async_write) {
+				cl_mem memory = clCreateBuffer(context, mem_flags, length * sizeof(T), nullptr, &status);
 				RAC_ASSERT(status == CL_SUCCESS, "clCreateBuffer() failed");
 				RAC_ASSERT(memory, "clCreateBuffer() failed");
 				_memory = decltype(_memory)(memory, clReleaseMemObject);
+
+				status = clEnqueueWriteBuffer(queue, _memory.get(), CL_FALSE /* blocking */, 0, _length * sizeof(T), value, 0, nullptr, nullptr);
+				RAC_ASSERT(status == CL_SUCCESS, "clEnqueueReadBuffer() failed");
 			}
 			else {
 				cl_mem memory = clCreateBuffer(context, mem_flags | CL_MEM_COPY_HOST_PTR, length * sizeof(T), (void *)value, &status);

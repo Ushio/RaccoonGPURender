@@ -123,8 +123,8 @@ __kernel void logic(
 
     // add contribution
     if(newPath) {
-        // float kRadianceClamp = 1000.0f;
-        float kRadianceClamp = FLT_MAX;
+        float kRadianceClamp = 1000.0f;
+        // float kRadianceClamp = FLT_MAX;
         if(all(isfinite(L)) && all(L < (float3)(kRadianceClamp))) {
             uint pixel_index = wavefrontPath[gid].pixel_index;
             atomic_add_global(&rgb32accum[pixel_index].r, L.x);

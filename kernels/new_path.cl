@@ -55,8 +55,20 @@ __kernel void new_path(
     //     + camera.imageplane_r * ((float)x + 0.5f)
     //     + camera.imageplane_b * ((float)y + 0.5f);
 
-    wavefrontPath[path_index].ro = camera.eye;
-    wavefrontPath[path_index].rd = normalize(sample_on_objectplane - camera.eye);
+    // sample on bottom circle
+    float u0 = random_uniform(&random_state);
+    float u1 = random_uniform(&random_state);
+    float dof = 0.0045f;
+	float r = sqrt(u0);
+	float theta = u1 * M_PI * 2.0f;
+	float lensx = dof * r * cos(theta);
+	float lensy = dof * r * sin(theta);
+    float3 lens_sample = camera.eye + camera.up * lensx + camera.right * lensy;
+
+    // wavefrontPath[path_index].ro = camera.eye;
+    // wavefrontPath[path_index].rd = normalize(sample_on_objectplane - camera.eye);
+    wavefrontPath[path_index].ro = lens_sample;
+    wavefrontPath[path_index].rd = normalize(sample_on_objectplane - lens_sample);
 
     inVolumeLists[path_index].count = 0;
 

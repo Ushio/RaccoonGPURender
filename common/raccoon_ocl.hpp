@@ -15,13 +15,14 @@
 #include <CL/cl_platform.h>
 
 #include "timeline_profiler.hpp"
+#include "stopwatch.hpp"
 
 #define USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION 1
 #define USE_PPL_AT_CREATE_CONTEXT 0
 
 #if USE_DEBUG_BREAK_INSTEAD_OF_EXCEPTION
 #include <intrin.h>
-#define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); __debugbreak(); }
+#define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); printf("%s\n", buffer); __debugbreak(); }
 #else
 #define RAC_ASSERT(status, message) if((status) == 0) { char buffer[512]; snprintf(buffer, sizeof(buffer), "%s, %s (%d line)\n", message, __FILE__, __LINE__); throw std::runtime_error(buffer); }
 #endif
@@ -580,27 +581,27 @@ namespace rt {
 			bool is_gpu;
 			bool has_unified_memory;
 		};
+
 		OpenCLContext(bool skipCPU = true) {
 			SCOPED_PROFILE("OpenCLContext()");
 
-			cl_int status;
-			//cl_uint numOfPlatforms;
-			//status = clGetPlatformIDs(0, NULL, &numOfPlatforms);
-			//printf("clGetPlatformIDs()\n");
+			_putenv("CUDA_VISIBLE_DEVICES=0,1,2,3,4,5");
 
-			//RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
-			//RAC_ASSERT(numOfPlatforms != 0, "no available opencl platform");
+			cl_int status;
 
 			cl_uint numOfPlatforms = 32;
 			std::vector<cl_platform_id> platforms(numOfPlatforms);
-			status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
+			{
+				SCOPED_PROFILE("clGetPlatformIDs()");
+				status = clGetPlatformIDs(numOfPlatforms, platforms.data(), &numOfPlatforms);
+			}
 			RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformIDs() failed");
-
 			platforms.resize(numOfPlatforms);
 
 			for (cl_platform_id platform : platforms)
 			{
 				SCOPED_PROFILE("for (cl_platform_id platform : platforms)");
+				// printf("device_id: %p\n", platform);
 
 				PlatformInfo platform_info;
 				status = opencl_platform_info(platform_info.profile, platform, CL_PLATFORM_PROFILE);  RAC_ASSERT(status == CL_SUCCESS, "clGetPlatformInfo() failed");
@@ -688,7 +689,7 @@ namespace rt {
 
 					{
 						DeviceContext deviceContext;
-						deviceContext.platform_info = platform_info;
+						// deviceContext.platform_info = platform_info;
 						deviceContext.platform_id = platform;
 						deviceContext.device_info = device_info;
 						deviceContext.device_id = device_id;

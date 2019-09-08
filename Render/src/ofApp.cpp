@@ -10,6 +10,9 @@
 using namespace rt;
 
 WavefrontPathTracing *pt = nullptr;
+char *image_ptr = nullptr;
+int image_width = 0;
+int image_height = 0;
 
 //--------------------------------------------------------------
 void ofApp::setup() {
@@ -49,24 +52,32 @@ void ofApp::initialize_render() {
 		}
 		printf("]\n");
 
-		Stopwatch sw;
+		if (image_ptr == nullptr) {
+			image_ptr = (char *)malloc(w * h * 4);
+			image_width = w;
+			image_height = h;
+		}
 
-		libattopng_t* png = libattopng_new(w, h, PNG_RGBA);
+		memcpy(image_ptr, p, w * h * 4);
+		printf("time %.2f s\n", ofGetElapsedTimef());
 
-		// This is dirty hack. too bad but fast.
-		png->data = (char *)p;
+		//Stopwatch sw;
+		//libattopng_t* png = libattopng_new(w, h, PNG_RGBA);
 
-		static int i = 0;
-		char name[64];
-		// sprintf(name, "render_%d.png", i++);
-		sprintf(name, "../../../output_images/render_%d.png", i++);
-		
-		libattopng_save(png, ofToDataPath(name).c_str());
-		png->data = nullptr;
-		libattopng_destroy(png);
+		//// This is dirty hack. too bad but fast.
+		//png->data = (char *)p;
 
-		printf("saved %s, at %.2f s\n", name, ofGetElapsedTimef());
-		printf("  png save %.2f s\n", sw.elapsed());
+		//static int i = 0;
+		//char name[64];
+		//// sprintf(name, "render_%d.png", i++);
+		//sprintf(name, "../../../output_images/render_%d.png", i++);
+		//
+		//libattopng_save(png, ofToDataPath(name).c_str());
+		//png->data = nullptr;
+		//libattopng_destroy(png);
+
+		//printf("saved %s, at %.2f s\n", name, ofGetElapsedTimef());
+		//printf("  png save %.2f s\n", sw.elapsed());
 
 		//ofPixels imagedata;
 		//imagedata.setFromPixels((uint8_t *)p, w, h, OF_IMAGE_COLOR_ALPHA);
@@ -98,7 +109,25 @@ void ofApp::exit() {
 //--------------------------------------------------------------
 void ofApp::update() {
 	static bool is_exit = false;
-	if (is_exit == false && 57 < ofGetElapsedTimef()) {
+	if (is_exit == false && 57.0 < ofGetElapsedTimef() && image_ptr) {
+
+		Stopwatch sw;
+		libattopng_t* png = libattopng_new(image_width, image_height, PNG_RGBA);
+
+		// This is dirty hack. too bad but fast.
+		png->data = (char *)image_ptr;
+
+		static int i = 0;
+		char name[64];
+		// sprintf(name, "render_%d.png", i++);
+		sprintf(name, "../../../output_images/render_%d.png", i++);
+
+		libattopng_save(png, ofToDataPath(name).c_str());
+		png->data = nullptr;
+		libattopng_destroy(png);
+
+		printf("  png save %.2f s\n", sw.elapsed());
+
 		ofExit();
 		is_exit = true;
 	}

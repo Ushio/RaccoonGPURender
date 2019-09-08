@@ -27,6 +27,7 @@ public:
 
 	void initialize_render();
 
+
 	ofEasyCam _camera;
 	ofImage _image;
 

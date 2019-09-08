@@ -15,8 +15,9 @@
 #include "stopwatch.hpp"
 #include "timeline_profiler.hpp"
 
+
 namespace rt {
-	static const uint32_t kWavefrontPathCountGPU = 1 << 21; /* 2^21 */
+	static const uint32_t kWavefrontPathCountGPU = 1 << 22; /* 2^22 */
 	static const uint32_t kWavefrontPathCountCPU = 1 << 19; /* 2^19 */
 
 	struct WavefrontPath {

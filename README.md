@@ -4,4 +4,4 @@ https://sites.google.com/site/raytracingcamp7/
 ![image](15.ushio.jpg)
 
 # slide
-https://speakerdeck.com/ushiostarfish/raccoongpurender-for-rtcamp7?slide=9
+https://speakerdeck.com/ushiostarfish/raccoongpurender-for-rtcamp7
